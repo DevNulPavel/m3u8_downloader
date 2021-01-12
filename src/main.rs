@@ -16,7 +16,13 @@ use tokio::{
     fs::{
         File
     },
-    spawn
+    task::{
+        spawn_blocking
+    },
+    spawn,
+};
+use bytes::{
+    Bytes
 };
 use reqwest::{
     Client,
@@ -56,16 +62,19 @@ async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -
 
     let chunks_info = m3u8_rs::parse_media_playlist(&chunks_data)?.1;
 
-    // println!("{:#?}", chunks_info);
-
     Ok(chunks_info)
 }
 
-fn run_segments_stream(http_client: Client, stream_chunks_url: Url) -> mpsc::Receiver<Result<MediaSegment, AppError>>{
+fn run_segments_info_stream(http_client: Client, stream_chunks_url: Url, mut stop: tokio::sync::oneshot::Receiver<()>) -> mpsc::Receiver<Result<MediaSegment, AppError>>{
     let (sender, receiver) = mpsc::channel(40);
     spawn(async move {
         let mut previous_last_segment = 0;
         loop {
+            if stop.try_recv().is_ok(){
+                println!("Stop reeived");
+                break;
+            }
+
             let playlist_result = media_segments_for_url(&http_client, &stream_chunks_url).await;
             match playlist_result {
                 Ok(playlist) => {   
@@ -94,9 +103,65 @@ fn run_segments_stream(http_client: Client, stream_chunks_url: Url) -> mpsc::Rec
     receiver
 }
 
-// fn run_files_loading(http_client: Client, urls_stream: mpsc::Receiver<Result<MediaSegment, AppError>>) -> Result<(), AppError>{
+async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
+    let data = http_client
+        .get(url)
+        .send()
+        .await?
+        .bytes()
+        .await?;
 
-// }
+    Ok(data)
+}
+
+fn run_loading_stream(http_client: Client, base_url: Url, mut segments_receiver: mpsc::Receiver<Result<MediaSegment, AppError>>) -> mpsc::Receiver<Result<tokio::task::JoinHandle<Result<Bytes, AppError>>, AppError>> {
+    let (sender, receiver) = mpsc::channel(40);
+    spawn(async move {
+        while let Some(message) = segments_receiver.recv().await{
+            match message{
+                Ok(segment) => {
+                    let http_client = http_client.clone();
+                    let loading_url = base_url.join(&segment.uri).unwrap(); // TODO: ???
+                    println!("Chunk url: {}", loading_url);
+
+                    let join = spawn(load_chunk(http_client, loading_url));
+
+                    if sender.send(Ok(join)).await.is_err(){
+                        break;
+                    }
+                },
+                Err(err) => {
+                    if sender.send(Err(err)).await.is_err(){
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    receiver
+}
+
+fn loading_stream_to_bytes(mut loaders_receiver: mpsc::Receiver<Result<tokio::task::JoinHandle<Result<Bytes, AppError>>, AppError>>) -> mpsc::Receiver<Result<Bytes, AppError>> {
+    let (sender, receiver) = mpsc::channel(40);
+    spawn(async move {
+        while let Some(message) = loaders_receiver.recv().await{
+            match message {
+                Ok(join) => {
+                    let data = join.await.expect("Loader join failed"); // TODO: ???
+                    if sender.send(data).await.is_err(){
+                        break;
+                    }
+                },
+                Err(err) => {
+                    if sender.send(Err(err)).await.is_err(){
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    receiver
+}
 
 async fn async_main() -> Result<(), AppError> {
     println!("Hello, world!");
@@ -135,32 +200,69 @@ async fn async_main() -> Result<(), AppError> {
 
     let stream_chunks_url = base_url.join(&stream_info.uri)?;
     println!("Chunks info url: {}", stream_chunks_url);
-    
-    let mut file = File::create("result.ts").await?;
 
-    let mut receiver = run_segments_stream(http_client.clone(), stream_chunks_url);
+    let (finish_sender, finish_receiver) = tokio::sync::oneshot::channel();
+    spawn(async move {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Ctrc + C wait failed");
+        finish_sender.send(())
+            .expect("Stof signal send failed");
+    });
 
-    while let Some(message) = receiver.recv().await{
-        match message{
-            Ok(segment) => {
-                let http_client = http_client.clone();
-                let loading_url = base_url.join(&segment.uri)?;
-                println!("Chunk url: {}", loading_url);
+    let segments_receiver = run_segments_info_stream(http_client.clone(), stream_chunks_url, finish_receiver);
 
-                let data = http_client
-                    .get(loading_url)
-                    .send()
-                    .await?
-                    .bytes()
-                    .await?;
+    let loaders_stream = run_loading_stream(http_client.clone(), base_url, segments_receiver);
 
-                file.write_all(&data).await?;
+    let mut bytes_stream = loading_stream_to_bytes(loaders_stream);
+
+    let (mpv_sender, mut mpv_receiver) = mpsc::channel::<Bytes>(40);
+    spawn(async move{
+        let mut child = tokio::process::Command::new("mpv")
+            .arg("-")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .spawn()
+            .unwrap();
+        {
+            println!("MPV spawned");
+            if let Some(ref mut stdin) = child.stdin {
+                while let Some(data) = mpv_receiver.recv().await{
+                    println!("Send data to mpv");
+                    stdin.write_all(&data).await.unwrap();
+                }
+            }else{
+                println!("MPV no stdin");
+            }
+        }
+        child.kill().await.unwrap();
+        println!("MPV stopped");
+    });
+
+
+    let (file_sender, mut file_receiver) = mpsc::channel::<Bytes>(40);
+    spawn(async move{
+        let mut file = File::create("result.ts").await.unwrap();
+        while let Some(data) = file_receiver.recv().await{
+            println!("Saved to file");
+            file.write_all(&data).await.unwrap();
+        }
+    });
+
+    while let Some(data) = bytes_stream.recv().await{
+        match data{
+            Ok(data) => {
+                let f1 = mpv_sender.send(data.clone());
+                let f2 = file_sender.send(data);
+                let _ = tokio::join!(f1, f2);
             },
             Err(err) => {
                 return Err(err);
             }
         }
     }
+
+    println!("All chunks saved to file");
 
     Ok(())
 }
