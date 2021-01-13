@@ -2,6 +2,11 @@ mod app_arguments;
 mod error;
 mod downloader;
 
+use std::{
+    pin::{
+        Pin
+    }
+};
 use tokio::{
     runtime::{
         Builder
@@ -24,10 +29,10 @@ use tokio::{
     spawn,
 };
 use futures::{
-    Stream,
-    StreamExt,
-    TryStream,
-    TryStreamExt
+    Stream, 
+    StreamExt, 
+    TryStream, 
+    TryStreamExt, 
 };
 use bytes::{
     Bytes
@@ -88,18 +93,24 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
     Ok(data)
 }
 
-fn run_loading_stream(http_client: Client, base_url: Url, mut segments_receiver: mpsc::Receiver<Result<MediaSegment, AppError>>) -> mpsc::Receiver<Result<tokio::task::JoinHandle<Result<Bytes, AppError>>, AppError>> {
+fn run_loading_stream<S>(http_client: Client, base_url: Url, mut segments_receiver: S) -> mpsc::Receiver<Result<tokio::task::JoinHandle<Result<Bytes, AppError>>, AppError>> 
+where
+    S: tokio_stream::Stream + Send + 'static,
+    S::Item: Into<Result<MediaSegment, AppError>>  + Send
+{
     let (sender, receiver) = mpsc::channel(40);
-    spawn(async move {
-        while let Some(message) = segments_receiver.recv().await{
-            match message{
+
+    spawn(async move{
+        tokio::pin!(segments_receiver);
+        while let Some(message) = segments_receiver.next().await{
+            match message.into() {
                 Ok(segment) => {
                     let http_client = http_client.clone();
                     let loading_url = base_url.join(&segment.uri).unwrap(); // TODO: ???
                     println!("Chunk url: {}", loading_url);
-
+    
                     let join = spawn(load_chunk(http_client, loading_url));
-
+    
                     if sender.send(Ok(join)).await.is_err(){
                         break;
                     }
@@ -112,6 +123,7 @@ fn run_loading_stream(http_client: Client, base_url: Url, mut segments_receiver:
             }
         }
     });
+    
     receiver
 }
 
@@ -185,24 +197,30 @@ struct Chain<P: Processor>{
     last_channel: P::OutputChannel
 }
 impl<P: Processor> Chain<P> {
-    fn new<N>(c: N::InputChannel) -> Chain<N>
+    pub fn new<N, I>(p: N, c: N::InputChannel) -> Chain<N>
     where 
         N: Processor
     {
+        let last_channel = p.run(c);
         Chain{
-            last_channel: c
+            last_channel
         }
     }
 
     fn join<N>(self, p: N) -> Chain<N>
     where 
         N: Processor, 
-        N::InputChannel: From<P::OutputChannel>
+        P::OutputChannel: Into<N::InputChannel>,
+        // N::InputChannel: From<P::OutputChannel>,
     {
         let last_channel = p.run(self.last_channel.into());
         Chain{
             last_channel
         }
+    }
+
+    pub fn resolve(self) -> P::OutputChannel{
+        self.last_channel
     }
 }
 
@@ -220,9 +238,35 @@ impl ChunksUrlsActor {
 }
 impl Processor for ChunksUrlsActor{
     type InputChannel = oneshot::Receiver<()>;
-    type OutputChannel = mpsc::Receiver<Result<MediaSegment, AppError>>;
-    fn run(self, stop_receiver: Self::InputChannel) -> Self::OutputChannel {
-        let (sender, receiver) = mpsc::channel(40);
+    type OutputChannel = Pin<Box<dyn Stream<Item=Result<MediaSegment, AppError>> + Send>>;
+
+    fn run(self, mut stop_receiver: Self::InputChannel) -> Self::OutputChannel {
+        let stream = async_stream::try_stream!(
+            let mut previous_last_segment = 0;
+            loop {
+                if stop_receiver.try_recv().is_ok(){
+                    println!("Stop received");
+                    break;
+                }
+    
+                let playlist = media_segments_for_url(&self.http_client, &self.url).await?;
+                let mut seq = playlist.media_sequence;
+                for segment in playlist.segments.into_iter() {
+                    if seq > previous_last_segment{
+                        println!("Yield segment");
+                        yield segment;
+                        previous_last_segment = seq;
+                    }
+                    seq += 1;
+                }
+
+                let sleep_time = playlist.target_duration / 4.0 * 1000.0;
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_time as u64)).await;
+            }
+        );
+        Box::pin(stream)
+
+        /*let (sender, receiver) = mpsc::channel(40);
         spawn(async move {
             let mut previous_last_segment = 0;
             loop {
@@ -256,7 +300,7 @@ impl Processor for ChunksUrlsActor{
                 }
             }
         });
-        receiver
+        receiver*/
     }
 }
 
@@ -288,18 +332,28 @@ async fn async_main() -> Result<(), AppError> {
     // Получаем канал о прерывании работы
     let finish_receiver = run_interrupt_awaiter();
 
-    Chain::new(finish_receiver)
-        .join(ChunksUrlsActor::new(http_client.clone(), stream_chunks_url));
+    // let segments_receiver = Chain::new(ChunksUrlsActor::new(http_client.clone(), stream_chunks_url), finish_receiver)
+    //     .join(p)
+    //     .resolve();
+
+    // tokio::pin!(segments_receiver);
         
-    // let segments_receiver = ChunksUrlsActor::new(http_client.clone(), stream_chunks_url, finish_receiver).run();
-    // let loaders_stream = run_loading_stream(http_client.clone(), base_url, segments_receiver);
-    // let mut bytes_stream = loading_stream_to_bytes(loaders_stream);
+    let segments_receiver = ChunksUrlsActor::new(http_client.clone(), stream_chunks_url).run(finish_receiver);
+    let loaders_stream = run_loading_stream(http_client.clone(), base_url, segments_receiver);
+    let mut bytes_stream = loading_stream_to_bytes(loaders_stream);
 
     // Mpv
     let (mpv_sender, mut mpv_receiver) = mpsc::channel::<Bytes>(40);
     spawn(async move{
         let mut child = tokio::process::Command::new("mpv")
-            .arg("-")
+            .args(&[
+                "--cache=yes",
+                "--stream-buffer-size=64MiB",
+                "--demuxer-max-bytes=64MiB",
+                "--demuxer-max-back-bytes=64MiB",
+                "--cache-secs=20",
+                "-"
+            ])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::inherit())
             .spawn()
