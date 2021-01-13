@@ -24,7 +24,8 @@ use tokio::{
         File
     },
     task::{
-        spawn_blocking
+        spawn_blocking,
+        JoinHandle
     },
     spawn,
 };
@@ -93,45 +94,38 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
     Ok(data)
 }
 
-fn run_loading_stream<S>(http_client: Client, base_url: Url, mut segments_receiver: S) -> mpsc::Receiver<Result<tokio::task::JoinHandle<Result<Bytes, AppError>>, AppError>> 
+fn run_loading_stream<S>(http_client: Client, base_url: Url, segments_receiver: S) -> impl Stream<Item=Result<JoinHandle<Result<Bytes, AppError>>, AppError>> 
 where
     S: tokio_stream::Stream + Send + 'static,
     S::Item: Into<Result<MediaSegment, AppError>>  + Send
 {
-    let (sender, receiver) = mpsc::channel(40);
-
-    spawn(async move{
+    let stream = async_stream::try_stream!(
         tokio::pin!(segments_receiver);
         while let Some(message) = segments_receiver.next().await{
-            match message.into() {
-                Ok(segment) => {
-                    let http_client = http_client.clone();
-                    let loading_url = base_url.join(&segment.uri).unwrap(); // TODO: ???
-                    println!("Chunk url: {}", loading_url);
-    
-                    let join = spawn(load_chunk(http_client, loading_url));
-    
-                    if sender.send(Ok(join)).await.is_err(){
-                        break;
-                    }
-                },
-                Err(err) => {
-                    if sender.send(Err(err)).await.is_err(){
-                        break;
-                    }
-                }
-            }
+            let segment = message.into()?;
+            let http_client = http_client.clone();
+            let loading_url = base_url.join(&segment.uri)?;
+            println!("Chunk url: {}", loading_url);
+
+            let join = spawn(load_chunk(http_client, loading_url));
+            
+            yield join;
         }
-    });
+    );
     
-    receiver
+    stream
 }
 
-fn loading_stream_to_bytes(mut loaders_receiver: mpsc::Receiver<Result<tokio::task::JoinHandle<Result<Bytes, AppError>>, AppError>>) -> mpsc::Receiver<Result<Bytes, AppError>> {
+fn loading_stream_to_bytes<S>(loaders_receiver: S) -> mpsc::Receiver<Result<Bytes, AppError>>
+where 
+    S: Stream + Send + 'static,
+    S::Item: Into<Result<JoinHandle<Result<Bytes, AppError>>, AppError>> + Send
+{
     let (sender, receiver) = mpsc::channel(40);
     spawn(async move {
-        while let Some(message) = loaders_receiver.recv().await{
-            match message {
+        tokio::pin!(loaders_receiver);
+        while let Some(message) = loaders_receiver.next().await{
+            match message.into() {
                 Ok(join) => {
                     let data = join.await.expect("Loader join failed"); // TODO: ???
                     if sender.send(data).await.is_err(){
@@ -348,10 +342,10 @@ async fn async_main() -> Result<(), AppError> {
         let mut child = tokio::process::Command::new("mpv")
             .args(&[
                 "--cache=yes",
-                "--stream-buffer-size=64MiB",
-                "--demuxer-max-bytes=64MiB",
-                "--demuxer-max-back-bytes=64MiB",
-                "--cache-secs=20",
+                "--stream-buffer-size=256MiB",
+                "--demuxer-max-bytes=256MiB",
+                "--demuxer-max-back-bytes=256MiB",
+                "--cache-secs=60",
                 "-"
             ])
             .stdin(std::process::Stdio::piped())
@@ -363,13 +357,15 @@ async fn async_main() -> Result<(), AppError> {
             if let Some(ref mut stdin) = child.stdin {
                 while let Some(data) = mpv_receiver.recv().await{
                     println!("Send data to mpv");
-                    stdin.write_all(&data).await.unwrap();
+                    if stdin.write_all(&data).await.is_err(){
+                        break;
+                    }
                 }
             }else{
                 println!("MPV no stdin");
             }
         }
-        child.kill().await.unwrap();
+        child.kill().await.ok();
         println!("MPV stopped");
     });
 
