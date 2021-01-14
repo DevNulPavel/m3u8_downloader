@@ -1,32 +1,27 @@
 mod app_arguments;
 mod error;
-mod downloader;
+mod chunks_url_generator;
+mod loading_starter;
+mod load_stream_to_bytes;
 
-use std::{
-    pin::{
-        Pin
-    }
-};
 use tokio::{
     runtime::{
         Builder
     },
     io::{
-        AsyncWrite,
         AsyncWriteExt
     },
     sync::{
         mpsc,
-        oneshot,
-        Notify
+        oneshot
     },
     fs::{
         File
     },
     task::{
-        spawn_blocking,
         JoinHandle
     },
+    pin,
     spawn,
 };
 use futures::{
@@ -45,103 +40,23 @@ use reqwest::{
 use m3u8_rs::{
     playlist::{
         MasterPlaylist,
-        MediaPlaylist,
-        VariantStream,
-        MediaSegment
+        VariantStream
     }
 };
 use self::{
     error::{
         AppError
+    },
+    chunks_url_generator::{
+        run_url_generator
+    },
+    loading_starter::{
+        run_loading_stream
+    },
+    load_stream_to_bytes::{
+        loading_stream_to_bytes
     }
 };
-
-
-fn select_stream(playlist: MasterPlaylist) -> Result<VariantStream, AppError> {
-    // TODO: Интерактивный выбор стрима
-    playlist
-        .variants
-        .into_iter()
-        .last()
-        .ok_or(AppError::MasterStreamIsEmpty)
-}
-
-async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -> Result<MediaPlaylist, AppError> {
-    let chunks_data = http_client
-        .get(stream_chunks_url.as_ref())
-        .send()
-        .await?
-        .bytes()
-        .await?;
-
-    let chunks_info = m3u8_rs::parse_media_playlist(&chunks_data)?.1;
-
-    Ok(chunks_info)
-}
-
-// fn run_segments_info_stream(http_client: Client, stream_chunks_url: Url, mut stop: oneshot::Receiver<()>) -> mpsc::Receiver<Result<MediaSegment, AppError>>{
-    
-// }
-
-async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
-    let data = http_client
-        .get(url)
-        .send()
-        .await?
-        .bytes()
-        .await?;
-
-    Ok(data)
-}
-
-fn run_loading_stream<S>(http_client: Client, base_url: Url, segments_receiver: S) -> impl Stream<Item=Result<JoinHandle<Result<Bytes, AppError>>, AppError>> 
-where
-    S: tokio_stream::Stream + Send + 'static,
-    S::Item: Into<Result<MediaSegment, AppError>>  + Send
-{
-    let stream = async_stream::try_stream!(
-        tokio::pin!(segments_receiver);
-        while let Some(message) = segments_receiver.next().await{
-            let segment = message.into()?;
-            let http_client = http_client.clone();
-            let loading_url = base_url.join(&segment.uri)?;
-            println!("Chunk url: {}", loading_url);
-
-            let join = spawn(load_chunk(http_client, loading_url));
-            
-            yield join;
-        }
-    );
-    
-    stream
-}
-
-fn loading_stream_to_bytes<S>(loaders_receiver: S) -> mpsc::Receiver<Result<Bytes, AppError>>
-where 
-    S: Stream + Send + 'static,
-    S::Item: Into<Result<JoinHandle<Result<Bytes, AppError>>, AppError>> + Send
-{
-    let (sender, receiver) = mpsc::channel(40);
-    spawn(async move {
-        tokio::pin!(loaders_receiver);
-        while let Some(message) = loaders_receiver.next().await{
-            match message.into() {
-                Ok(join) => {
-                    let data = join.await.expect("Loader join failed"); // TODO: ???
-                    if sender.send(data).await.is_err(){
-                        break;
-                    }
-                },
-                Err(err) => {
-                    if sender.send(Err(err)).await.is_err(){
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    receiver
-}
 
 fn base_url_from_master_playlist_url(url: Url) -> Result<Url, AppError>{
     let mut base_url = url.clone();
@@ -168,6 +83,15 @@ async fn request_master_playlist(http_client: &Client, url: Url) -> Result<Maste
     Ok(playlist_info)
 }
 
+fn select_stream(playlist: MasterPlaylist) -> Result<VariantStream, AppError> {
+    // TODO: Интерактивный выбор стрима
+    playlist
+        .variants
+        .into_iter()
+        .last()
+        .ok_or(AppError::MasterStreamIsEmpty)
+}
+
 fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
     let (finish_sender, finish_receiver) = tokio::sync::oneshot::channel();
     spawn(async move {
@@ -180,121 +104,80 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
     finish_receiver
 }
 
-
-trait Processor{
-    type InputChannel;
-    type OutputChannel;
-    fn run(self, input: Self::InputChannel) -> Self::OutputChannel;
+pub struct DataReceiver {
+    join: JoinHandle<Result<(), AppError>>,
+    sender: mpsc::Sender<Bytes>
 }
-
-struct Chain<P: Processor>{
-    last_channel: P::OutputChannel
-}
-impl<P: Processor> Chain<P> {
-    pub fn new<N, I>(p: N, c: N::InputChannel) -> Chain<N>
-    where 
-        N: Processor
-    {
-        let last_channel = p.run(c);
-        Chain{
-            last_channel
-        }
+impl DataReceiver {
+    pub async fn stop_and_wait_finish(self) -> Result<(), AppError>{
+        drop(self.sender);
+        self.join.await?
     }
-
-    fn join<N>(self, p: N) -> Chain<N>
-    where 
-        N: Processor, 
-        P::OutputChannel: Into<N::InputChannel>,
-        // N::InputChannel: From<P::OutputChannel>,
-    {
-        let last_channel = p.run(self.last_channel.into());
-        Chain{
-            last_channel
-        }
-    }
-
-    pub fn resolve(self) -> P::OutputChannel{
-        self.last_channel
+    pub async fn send(&self, data: Bytes) -> Result<(), AppError>{
+        self.sender.send(data).await?;
+        Ok(())
     }
 }
 
-struct ChunksUrlsActor{
-    http_client: Client,
-    url: Url,
-}
-impl ChunksUrlsActor {
-    pub fn new(http_client: Client, url: Url) -> Self {
-        ChunksUrlsActor{
-            http_client,
-            url
-        }
-    }
-}
-impl Processor for ChunksUrlsActor{
-    type InputChannel = oneshot::Receiver<()>;
-    type OutputChannel = Pin<Box<dyn Stream<Item=Result<MediaSegment, AppError>> + Send>>;
+fn start_mpv_process() -> DataReceiver {
+    // Mpv
+    let (sender, mut mpv_receiver) = mpsc::channel::<Bytes>(40);
+    let join = spawn(async move{
+        // TODO: Разобраться с предварительным кешированием
+        let mut child = tokio::process::Command::new("mpv")
+            .args(&[
+                "--cache=yes",
+                "--stream-buffer-size=256MiB",
+                "--demuxer-max-bytes=256MiB",
+                "--demuxer-max-back-bytes=256MiB",
+                "--cache-secs=60",
+                "-"
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .spawn()?;
+        {
+            println!("MPV spawned");
+            if let Some(ref mut stdin) = child.stdin {
+                while let Some(data) = mpv_receiver.recv().await{
+                    println!("Send data to mpv");
 
-    fn run(self, mut stop_receiver: Self::InputChannel) -> Self::OutputChannel {
-        let stream = async_stream::try_stream!(
-            let mut previous_last_segment = 0;
-            loop {
-                if stop_receiver.try_recv().is_ok(){
-                    println!("Stop received");
-                    break;
-                }
-    
-                let playlist = media_segments_for_url(&self.http_client, &self.url).await?;
-                let mut seq = playlist.media_sequence;
-                for segment in playlist.segments.into_iter() {
-                    if seq > previous_last_segment{
-                        println!("Yield segment");
-                        yield segment;
-                        previous_last_segment = seq;
-                    }
-                    seq += 1;
-                }
-
-                let sleep_time = playlist.target_duration / 4.0 * 1000.0;
-                tokio::time::sleep(std::time::Duration::from_millis(sleep_time as u64)).await;
-            }
-        );
-        Box::pin(stream)
-
-        /*let (sender, receiver) = mpsc::channel(40);
-        spawn(async move {
-            let mut previous_last_segment = 0;
-            loop {
-                if stop_receiver.try_recv().is_ok(){
-                    println!("Stop reeived");
-                    break;
-                }
-    
-                let playlist_result = media_segments_for_url(&self.http_client, &self.url).await;
-                match playlist_result {
-                    Ok(playlist) => {   
-                        let mut seq = playlist.media_sequence;
-                        for segment in playlist.segments.into_iter() {
-                            if seq > previous_last_segment{
-                                if sender.send(Ok(segment)).await.is_err(){
-                                    break;
-                                }
-                                previous_last_segment = seq;
-                            }
-                            seq += 1;
-                        }
-    
-                        let sleep_time = playlist.target_duration / 4.0 * 1000.0;
-                        tokio::time::sleep(std::time::Duration::from_millis(sleep_time as u64)).await;
-                    },
-                    Err(err) => {
-                        if sender.send(Err(err)).await.is_err() {
-                            break;
-                        }
+                    // При закрытии MPV просто прерываем обработку, не считаем за ошибку
+                    if stdin.write_all(&data).await.is_err(){
+                        break;
                     }
                 }
+            }else{
+                println!("MPV no stdin");
             }
-        });
-        receiver*/
+        }
+        child.kill().await?;
+        println!("MPV stopped");
+
+        Ok(())
+    });
+    DataReceiver{
+        join,
+        sender
+    }
+}
+
+fn start_file_writer() -> DataReceiver {
+    let (sender, mut file_receiver) = mpsc::channel::<Bytes>(40);
+    let join = spawn(async move{
+        let mut file = File::create("result.ts").await?;
+        while let Some(data) = file_receiver.recv().await{
+            println!("Saved to file");
+            file.write_all(&data).await?;
+        }
+        file.sync_all().await?;
+        println!("File write stopped");
+        Ok(())
+    });
+
+    DataReceiver{
+        join,
+        sender
     }
 }
 
@@ -325,76 +208,61 @@ async fn async_main() -> Result<(), AppError> {
 
     // Получаем канал о прерывании работы
     let finish_receiver = run_interrupt_awaiter();
-
-    // let segments_receiver = Chain::new(ChunksUrlsActor::new(http_client.clone(), stream_chunks_url), finish_receiver)
-    //     .join(p)
-    //     .resolve();
-
-    // tokio::pin!(segments_receiver);
         
-    let segments_receiver = ChunksUrlsActor::new(http_client.clone(), stream_chunks_url).run(finish_receiver);
+    // Цепочка из стримов обработки
+    let segments_receiver = run_url_generator(http_client.clone(), stream_chunks_url, finish_receiver);
     let loaders_stream = run_loading_stream(http_client.clone(), base_url, segments_receiver);
-    let mut bytes_stream = loading_stream_to_bytes(loaders_stream);
+    let bytes_stream = loading_stream_to_bytes(loaders_stream);
 
-    // Mpv
-    let (mpv_sender, mut mpv_receiver) = mpsc::channel::<Bytes>(40);
-    spawn(async move{
-        let mut child = tokio::process::Command::new("mpv")
-            .args(&[
-                "--cache=yes",
-                "--stream-buffer-size=256MiB",
-                "--demuxer-max-bytes=256MiB",
-                "--demuxer-max-back-bytes=256MiB",
-                "--cache-secs=60",
-                "-"
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::inherit())
-            .spawn()
-            .unwrap();
-        {
-            println!("MPV spawned");
-            if let Some(ref mut stdin) = child.stdin {
-                while let Some(data) = mpv_receiver.recv().await{
-                    println!("Send data to mpv");
-                    if stdin.write_all(&data).await.is_err(){
-                        break;
-                    }
-                }
-            }else{
-                println!("MPV no stdin");
-            }
-        }
-        child.kill().await.ok();
-        println!("MPV stopped");
-    });
+    // Выдаем в результаты
+    let receivers = vec![
+        start_mpv_process(),  // MPV
+        start_file_writer()   // File
+    ];
 
-    // File
-    let (file_sender, mut file_receiver) = mpsc::channel::<Bytes>(40);
-    spawn(async move{
-        let mut file = File::create("result.ts").await.unwrap();
-        while let Some(data) = file_receiver.recv().await{
-            println!("Saved to file");
-            file.write_all(&data).await.unwrap();
-        }
-    });
-
-    while let Some(data) = bytes_stream.recv().await{
-        match data{
-            Ok(data) => {
-                let f1 = mpv_sender.send(data.clone());
-                let f2 = file_sender.send(data);
-                let _ = tokio::join!(f1, f2);
-            },
+    pin!(bytes_stream);
+    let mut found_error = Ok(());
+    while let Some(data) = bytes_stream.next().await{
+        // Отлавливаем только ошибки в стримах
+        let data = match data{
+            Ok(data) => data,
             Err(err) => {
-                return Err(err);
+                found_error = Err(err);
+                break;
             }
+        };
+
+        // Отдаем получателям
+        let futures_iter = receivers
+            .iter()
+            .map(|receiver|{
+                receiver.send(data.clone())
+            });
+        let found_err = futures::future::join_all(futures_iter)
+            .await
+            .into_iter()
+            .find(|res|{
+                res.is_err()
+            });
+
+        // На ошибку отдачи данных просто прекращаем работу цикла
+        if found_err.is_some() {
+            break;
         }
     }
 
     println!("All chunks saved to file");
 
-    Ok(())
+    // Wait all finish
+    for receiver in receivers.into_iter(){
+        if let Err(err) = receiver.stop_and_wait_finish().await{
+            println!("Receiver stop error: {}", err);
+        }
+    }
+
+    println!("All receivers finished");
+
+    found_error
 }
 
 fn main()  -> Result<(), AppError> {

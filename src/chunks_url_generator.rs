@@ -1,0 +1,67 @@
+use tokio::{
+    sync::{
+        oneshot,
+    }
+};
+use futures::{
+    Stream
+};
+use reqwest::{
+    Client,
+    Url
+};
+use m3u8_rs::{
+    playlist::{
+        MediaPlaylist,
+        MediaSegment
+    }
+};
+use super::{
+    error::{
+        AppError
+    }
+};
+
+async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -> Result<MediaPlaylist, AppError> {
+    let chunks_data = http_client
+        .get(stream_chunks_url.as_ref())
+        .send()
+        .await?
+        .bytes()
+        .await?;
+
+    let chunks_info = m3u8_rs::parse_media_playlist(&chunks_data)?.1;
+
+    Ok(chunks_info)
+}
+
+pub type UrlGeneratorResult = Result<MediaSegment, AppError>;
+
+pub fn run_url_generator(http_client: Client, 
+                         info_url: Url, 
+                         mut stop_receiver: oneshot::Receiver<()>) -> impl Stream<Item=UrlGeneratorResult> {
+    let stream = async_stream::try_stream!(
+        let mut previous_last_segment = 0;
+        loop {
+            if stop_receiver.try_recv().is_ok(){
+                println!("Stop received");
+                break;
+            }
+
+            let playlist = media_segments_for_url(&http_client, &info_url).await?;
+            let mut seq = playlist.media_sequence;
+            for segment in playlist.segments.into_iter() {
+                if seq > previous_last_segment{
+                    println!("Yield segment");
+                    yield segment;
+                    previous_last_segment = seq;
+                }
+                seq += 1;
+            }
+
+            let sleep_time = playlist.target_duration / 4.0 * 1000.0;
+            tokio::time::sleep(std::time::Duration::from_millis(sleep_time as u64)).await;
+        }
+    );
+    stream
+}

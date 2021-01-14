@@ -7,6 +7,18 @@ use std::{
         PathBuf
     }
 };
+use tokio::{
+    sync::{
+        mpsc::{
+            error::{
+                SendError
+            }
+        }
+    }
+};
+use bytes::{
+    Bytes
+};
 use url::{
     ParseError
 };
@@ -35,6 +47,16 @@ quick_error!{
         /// File error
         FileError(filename: PathBuf, err: io::Error) {
             context(path: &'a Path, err: io::Error) -> (path.to_path_buf(), err)
+        }
+
+        /// Join error
+        JoinError(err: tokio::task::JoinError) {
+            from()
+        }
+
+        /// Join error
+        ReceiverSendError {
+            from(SendError<Bytes>)
         }
 
         /// URL error
