@@ -1,12 +1,15 @@
 use tokio::{
     task::{
-        JoinHandle
+        JoinHandle,
+        JoinError
     },
     spawn,
 };
 use futures::{
     Stream, 
-    StreamExt
+    StreamExt,
+    TryStream,
+    TryStreamExt
 };
 use bytes::{
     Bytes
@@ -15,15 +18,17 @@ use reqwest::{
     Client,
     Url
 };
+use m3u8_rs::{
+    playlist::{
+        MediaSegment
+    }
+};
 use async_stream::{
     try_stream
 };
 use super::{
     error::{
         AppError
-    },
-    segments_stream_to_segment::{
-        MediaResult
     }
 };
 
@@ -39,18 +44,17 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
 }
 
 pub type LoadingJoin = JoinHandle<Result<Bytes, AppError>>;
-pub type LoadingResult = Result<LoadingJoin, AppError>;
 
 pub fn run_loading_stream<S>(http_client: Client, 
                              base_url: Url, 
-                             segments_receiver: S) -> impl Stream<Item=LoadingResult> 
+                             segments_receiver: S) -> impl TryStream<Ok=LoadingJoin, Error=AppError> 
 where
-    S: Stream<Item=MediaResult>
+    S: TryStream<Ok=MediaSegment, Error=AppError>
 {
     let stream = try_stream!(
+        let segments_receiver = segments_receiver.into_stream(); // TODO: Можно ли убрать???
         tokio::pin!(segments_receiver);
-        while let Some(message) = segments_receiver.next().await{
-            let segment = message.into()?;
+        while let Some(segment) = segments_receiver.try_next().await?{
             let http_client = http_client.clone();
             let loading_url = base_url.join(&segment.uri)?;
             println!("Chunk url: {}", loading_url);
@@ -60,6 +64,5 @@ where
             yield join;
         }
     );
-    
     stream
 }

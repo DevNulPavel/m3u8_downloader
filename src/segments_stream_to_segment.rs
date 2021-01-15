@@ -1,11 +1,10 @@
 use futures::{
     stream::{
         Stream,
-        StreamExt
+        StreamExt,
+        TryStream,
+        TryStreamExt
     }
-};
-use bytes::{
-    Bytes
 };
 use async_stream::{
     try_stream
@@ -25,16 +24,14 @@ use super::{
 };
 
 
-pub type MediaResult = Result<MediaSegment, AppError>;
-
-pub fn segments_vec_to_segment<S>(receiver: S) -> impl Stream<Item=MediaResult>
+pub fn segments_vec_to_segment<S>(receiver: S) -> impl TryStream<Ok=MediaSegment, Error=AppError>
 where 
-    S: Stream<Item=UrlGeneratorResult>
+    S: TryStream<Ok=Vec<MediaSegment>, Error=AppError>
 {
     let stream = try_stream!(
+        let receiver = receiver.into_stream(); // TODO: Можно ли избавиться?
         tokio::pin!(receiver);
-        while let Some(message) = receiver.next().await{
-            let segments = message?;
+        while let Some(segments) = receiver.try_next().await? {
             for segment in segments.into_iter(){
                 yield segment;
             }

@@ -4,7 +4,12 @@ use tokio::{
     }
 };
 use futures::{
-    Stream
+    stream::{
+        StreamExt,
+        Stream,
+        TryStream,
+        TryStreamExt
+    }
 };
 use reqwest::{
     Client,
@@ -35,11 +40,11 @@ async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -
     Ok(chunks_info)
 }
 
-pub type UrlGeneratorResult = Result<Vec<MediaSegment>, AppError>;
+pub type UrlGeneratorResult = Vec<MediaSegment>;
 
 pub fn run_url_generator(http_client: Client, 
                          info_url: Url, 
-                         mut stop_receiver: oneshot::Receiver<()>) -> impl Stream<Item=UrlGeneratorResult> {
+                         mut stop_receiver: oneshot::Receiver<()>) -> impl TryStream<Ok=UrlGeneratorResult, Error=AppError> {
     let stream = async_stream::try_stream!(
         let mut previous_last_segment = 0;
         loop {

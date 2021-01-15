@@ -10,30 +10,17 @@ use tokio::{
     runtime::{
         Builder
     },
-    io::{
-        AsyncWriteExt
-    },
     sync::{
-        mpsc,
         oneshot
-    },
-    fs::{
-        File
-    },
-    task::{
-        JoinHandle
     },
     pin,
     spawn,
 };
 use futures::{
-    Stream, 
-    StreamExt, 
-    TryStream, 
-    TryStreamExt, 
-};
-use bytes::{
-    Bytes
+    StreamExt,
+    Stream,
+    TryStream,
+    TryStreamExt
 };
 use reqwest::{
     Client,
@@ -62,7 +49,6 @@ use self::{
         segments_vec_to_segment
     },
     receivers::{
-        DataReceiver,
         start_file_receiver,
         start_mpv_receiver
     }
@@ -152,12 +138,13 @@ async fn async_main() -> Result<(), AppError> {
 
     // Выдаем в результаты
     let receivers = vec![
-        //start_mpv_receiver(),   // MPV
+        start_mpv_receiver(),   // MPV
         start_file_receiver(),  // File
     ];
 
     // Обработка данных и отдача
     let mut found_error = None;
+    let bytes_stream = bytes_stream.into_stream();
     pin!(bytes_stream);
     while let Some(data) = bytes_stream.next().await{
         // Отлавливаем только ошибки в стримах
