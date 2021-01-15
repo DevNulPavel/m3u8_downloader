@@ -59,6 +59,7 @@ pub fn run_url_generator(http_client: Client,
                 seq += 1;
             }
 
+            // TODO: Вариант лучше?
             let sleep_time = playlist.target_duration / 4.0 * 1000.0;
             tokio::time::sleep(std::time::Duration::from_millis(sleep_time as u64)).await;
         }

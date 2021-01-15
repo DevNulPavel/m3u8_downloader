@@ -3,6 +3,7 @@ mod error;
 mod chunks_url_generator;
 mod loading_starter;
 mod load_stream_to_bytes;
+mod receivers;
 
 use tokio::{
     runtime::{
@@ -55,6 +56,11 @@ use self::{
     },
     load_stream_to_bytes::{
         loading_stream_to_bytes
+    },
+    receivers::{
+        DataReceiver,
+        start_file_receiver,
+        start_mpv_receiver
     }
 };
 
@@ -104,82 +110,6 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
     finish_receiver
 }
 
-pub struct DataReceiver {
-    join: JoinHandle<Result<(), AppError>>,
-    sender: mpsc::Sender<Bytes>
-}
-impl DataReceiver {
-    pub async fn stop_and_wait_finish(self) -> Result<(), AppError>{
-        drop(self.sender);
-        self.join.await?
-    }
-    pub async fn send(&self, data: Bytes) -> Result<(), AppError>{
-        self.sender.send(data).await?;
-        Ok(())
-    }
-}
-
-fn start_mpv_process() -> DataReceiver {
-    // Mpv
-    let (sender, mut mpv_receiver) = mpsc::channel::<Bytes>(40);
-    let join = spawn(async move{
-        // TODO: Разобраться с предварительным кешированием
-        let mut child = tokio::process::Command::new("mpv")
-            .args(&[
-                "--cache=yes",
-                "--stream-buffer-size=256MiB",
-                "--demuxer-max-bytes=256MiB",
-                "--demuxer-max-back-bytes=256MiB",
-                "--cache-secs=60",
-                "-"
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::inherit())
-            .spawn()?;
-        {
-            println!("MPV spawned");
-            if let Some(ref mut stdin) = child.stdin {
-                while let Some(data) = mpv_receiver.recv().await{
-                    println!("Send data to mpv");
-
-                    // При закрытии MPV просто прерываем обработку, не считаем за ошибку
-                    if stdin.write_all(&data).await.is_err(){
-                        break;
-                    }
-                }
-            }else{
-                println!("MPV no stdin");
-            }
-        }
-        child.kill().await?;
-        println!("MPV stopped");
-
-        Ok(())
-    });
-    DataReceiver{
-        join,
-        sender
-    }
-}
-
-fn start_file_writer() -> DataReceiver {
-    let (sender, mut file_receiver) = mpsc::channel::<Bytes>(40);
-    let join = spawn(async move{
-        let mut file = File::create("result.ts").await?;
-        while let Some(data) = file_receiver.recv().await{
-            println!("Saved to file");
-            file.write_all(&data).await?;
-        }
-        file.sync_all().await?;
-        println!("File write stopped");
-        Ok(())
-    });
-
-    DataReceiver{
-        join,
-        sender
-    }
-}
 
 async fn async_main() -> Result<(), AppError> {
     let url_string = std::env::var("M3U_URL").expect("Playlist url needed");
@@ -216,18 +146,19 @@ async fn async_main() -> Result<(), AppError> {
 
     // Выдаем в результаты
     let receivers = vec![
-        start_mpv_process(),  // MPV
-        start_file_writer()   // File
+        start_mpv_receiver(),   // MPV
+        start_file_receiver(),  // File
     ];
 
+    // Обработка данных и отдача
+    let mut found_error = None;
     pin!(bytes_stream);
-    let mut found_error = Ok(());
     while let Some(data) = bytes_stream.next().await{
         // Отлавливаем только ошибки в стримах
         let data = match data{
             Ok(data) => data,
             Err(err) => {
-                found_error = Err(err);
+                found_error = Some(err);
                 break;
             }
         };
@@ -235,7 +166,7 @@ async fn async_main() -> Result<(), AppError> {
         // Отдаем получателям
         let futures_iter = receivers
             .iter()
-            .map(|receiver|{
+            .map(move |receiver| {
                 receiver.send(data.clone())
             });
         let found_err = futures::future::join_all(futures_iter)
@@ -262,7 +193,10 @@ async fn async_main() -> Result<(), AppError> {
 
     println!("All receivers finished");
 
-    found_error
+    match found_error{
+        Some(err) => Err(err),
+        None => Ok(())
+    }
 }
 
 fn main()  -> Result<(), AppError> {
