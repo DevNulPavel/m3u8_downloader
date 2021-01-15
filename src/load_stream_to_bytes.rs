@@ -4,6 +4,11 @@ use futures::{
         StreamExt
     }
 };
+use tokio::{
+    sync::{
+        mpsc
+    }
+};
 use bytes::{
     Bytes
 };
@@ -22,13 +27,11 @@ use super::{
 
 pub type BytesResult = Result<Bytes, AppError>;
 
-pub fn loading_stream_to_bytes<S>(loaders_receiver: S) -> impl Stream<Item=BytesResult>
-where 
-    S: Stream<Item=LoadingResult>
+pub fn loading_stream_to_bytes(loaders_receiver: mpsc::Receiver<LoadingResult>) -> impl Stream<Item=BytesResult>
 {
     let stream = try_stream!(
         tokio::pin!(loaders_receiver);
-        while let Some(message) = loaders_receiver.next().await{
+        while let Some(message) = loaders_receiver.recv().await{
             let join = message?.await?;
             let data = join?;
             yield data;

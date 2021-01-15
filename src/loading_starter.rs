@@ -2,6 +2,9 @@ use tokio::{
     task::{
         JoinHandle
     },
+    sync::{
+        mpsc
+    },
     spawn,
 };
 use futures::{
@@ -18,12 +21,17 @@ use reqwest::{
 use async_stream::{
     try_stream
 };
+use m3u8_rs::{
+    playlist::{
+        MediaSegment
+    }
+};
 use super::{
     error::{
         AppError
     },
-    segments_stream_to_segment::{
-        MediaResult
+    chunks_url_generator::{
+        UrlGeneratorResult
     }
 };
 
@@ -43,23 +51,27 @@ pub type LoadingResult = Result<LoadingJoin, AppError>;
 
 pub fn run_loading_stream<S>(http_client: Client, 
                              base_url: Url, 
-                             segments_receiver: S) -> impl Stream<Item=LoadingResult> 
+                             segments_receiver: S) -> (JoinHandle<Result<(), AppError>>, mpsc::Receiver<LoadingResult>)
 where
-    S: Stream<Item=MediaResult>
+    S: Stream<Item=UrlGeneratorResult> + Send + 'static
 {
-    let stream = try_stream!(
+    let (sender, receiver) = mpsc::channel(10); // TODO: To parameters
+    let join = spawn(async move{
         tokio::pin!(segments_receiver);
         while let Some(message) = segments_receiver.next().await{
-            let segment = message.into()?;
+            let segment: MediaSegment = message?;
             let http_client = http_client.clone();
             let loading_url = base_url.join(&segment.uri)?;
             println!("Chunk url: {}", loading_url);
 
             let join = spawn(load_chunk(http_client, loading_url));
             
-            yield join;
+            if sender.send(Ok(join)).await.is_err() {
+                break;
+            }
         }
-    );
-    
-    stream
+        drop(sender);
+        Ok(())
+    });
+    (join, receiver)
 }

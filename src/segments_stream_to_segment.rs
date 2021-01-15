@@ -25,7 +25,7 @@ use super::{
 };
 
 
-pub type MediaResult = Result<MediaSegment, AppError>;
+/*pub type MediaResult = Result<MediaSegment, AppError>;
 
 pub fn segments_vec_to_segment<S>(receiver: S) -> impl Stream<Item=MediaResult>
 where 
@@ -41,4 +41,4 @@ where
         }
     );
     stream
-}
+}*/

@@ -58,9 +58,6 @@ use self::{
     load_stream_to_bytes::{
         loading_stream_to_bytes
     },
-    segments_stream_to_segment::{
-        segments_vec_to_segment
-    },
     receivers::{
         DataReceiver,
         start_file_receiver,
@@ -145,14 +142,13 @@ async fn async_main() -> Result<(), AppError> {
     let finish_receiver = run_interrupt_awaiter();
         
     // Цепочка из стримов обработки
-    let segments_receiver = run_url_generator(http_client.clone(), stream_chunks_url, finish_receiver);
-    let media_stream = segments_vec_to_segment(segments_receiver);
-    let loaders_stream = run_loading_stream(http_client.clone(), base_url, media_stream);
-    let bytes_stream = loading_stream_to_bytes(loaders_stream);
+    let segments_stream = run_url_generator(http_client.clone(), stream_chunks_url, finish_receiver);
+    let (loding_join, loaders_stream_channel) = run_loading_stream(http_client.clone(), base_url, segments_stream);
+    let bytes_stream = loading_stream_to_bytes(loaders_stream_channel);
 
     // Выдаем в результаты
     let receivers = vec![
-        //start_mpv_receiver(),   // MPV
+        start_mpv_receiver(),   // MPV
         start_file_receiver(),  // File
     ];
 
@@ -189,6 +185,9 @@ async fn async_main() -> Result<(), AppError> {
     }
 
     println!("All chunks saved to file");
+
+    // TODO: !!!
+    loding_join.await??;
 
     // Wait all finish
     for receiver in receivers.into_iter(){
