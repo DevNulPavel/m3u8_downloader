@@ -54,7 +54,7 @@ pub fn run_url_generator(http_client: Client,
             }
 
             let playlist = media_segments_for_url(&http_client, &info_url).await?;
-            println!("Playlist data: {:#?}", playlist);
+            // println!("Playlist data: {:#?}", playlist);
 
             let mut seq = playlist.media_sequence;
             let mut results = vec![];
@@ -73,7 +73,7 @@ pub fn run_url_generator(http_client: Client,
             yield results;
 
             // TODO: Вариант лучше?
-            let sleep_time = playlist.target_duration / 4.0 * 1000.0;
+            let sleep_time = playlist.target_duration / 6.0 * 1000.0;
             tokio::time::sleep(std::time::Duration::from_millis(sleep_time as u64)).await;
         }
     );

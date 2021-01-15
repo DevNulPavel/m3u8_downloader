@@ -32,6 +32,7 @@ pub fn start_mpv_receiver() -> DataReceiver {
         // TODO: Разобраться с предварительным кешированием
         let mut child = Command::new("mpv")
             .args(&[
+                "--no-osd-bar",
                 "--cache=yes",
                 "--stream-buffer-size=256MiB",
                 "--demuxer-max-bytes=256MiB",

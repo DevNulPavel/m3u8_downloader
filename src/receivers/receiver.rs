@@ -50,7 +50,9 @@ impl DataReceiver {
     pub async fn send(&self, data: Bytes) -> Result<(), AppError>{
         match &self.inner {
             Inner::Active{sender, ..} => {
-                sender.send(data).await?;
+                if !sender.is_closed(){
+                    sender.send(data).await?;
+                }
                 Ok(())
             },
             Inner::Complete => {

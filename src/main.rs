@@ -175,7 +175,7 @@ async fn async_main() -> Result<(), AppError> {
         }
     }
 
-    println!("All chunks saved to file");
+    println!("Loading loop finished");
 
     // Wait all finish
     for receiver in receivers.into_iter(){

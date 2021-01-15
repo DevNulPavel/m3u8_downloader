@@ -33,6 +33,8 @@ use super::{
 };
 
 async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
+    println!("Loading started");
+
     let data = http_client
         .get(url)
         .send()
@@ -57,7 +59,7 @@ where
         while let Some(segment) = segments_receiver.try_next().await?{
             let http_client = http_client.clone();
             let loading_url = base_url.join(&segment.uri)?;
-            println!("Chunk url: {}", loading_url);
+            // println!("Chunk url: {}", loading_url);
 
             let join = spawn(load_chunk(http_client, loading_url));
             

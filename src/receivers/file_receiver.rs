@@ -26,7 +26,7 @@ use super::{
 
 
 pub fn start_file_receiver() -> DataReceiver {
-    let (sender, mut file_receiver) = mpsc::channel::<Bytes>(40);
+    let (sender, mut file_receiver) = mpsc::channel::<Bytes>(10);
     let join = spawn(async move{
         let date_str = {
             let now = Local::now();
