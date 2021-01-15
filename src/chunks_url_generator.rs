@@ -1,3 +1,8 @@
+use std::{
+    time::{
+        Duration
+    }
+};
 use tokio::{
     sync::{
         oneshot,
@@ -30,6 +35,7 @@ use super::{
 async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -> Result<MediaPlaylist, AppError> {
     let chunks_data = http_client
         .get(stream_chunks_url.as_ref())
+        .timeout(Duration::from_secs(30))
         .send()
         .await?
         .bytes()
@@ -60,7 +66,7 @@ pub fn run_url_generator(http_client: Client,
             let mut results = vec![];
             for segment in playlist.segments.into_iter() {
                 if seq > previous_last_segment{
-                    if seq > (previous_last_segment+1) {
+                    if (previous_last_segment > 0) && (seq > (previous_last_segment+1)) {
                         println!("!!!! SEGMENT SKIPPED !!!!");    
                     }
                     println!("Yield segment");

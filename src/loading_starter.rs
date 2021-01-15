@@ -1,3 +1,8 @@
+use std::{
+    time::{
+        Duration
+    }
+};
 use tokio::{
     task::{
         JoinHandle,
@@ -37,6 +42,7 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
 
     let data = http_client
         .get(url)
+        .timeout(Duration::from_secs(30))
         .send()
         .await?
         .bytes()
@@ -54,7 +60,10 @@ where
     S: TryStream<Ok=MediaSegment, Error=AppError>
 {
     let stream = try_stream!(
-        let segments_receiver = segments_receiver.into_stream(); // TODO: Можно ли убрать???
+        let segments_receiver = segments_receiver
+            .into_stream()  // TODO: Можно ли убрать???
+            .map(|v| futures::future::ready(v) )
+            .buffered(10); 
         tokio::pin!(segments_receiver);
         while let Some(segment) = segments_receiver.try_next().await?{
             let http_client = http_client.clone();

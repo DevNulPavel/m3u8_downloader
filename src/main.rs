@@ -6,6 +6,11 @@ mod loading_starter;
 mod load_stream_to_bytes;
 mod receivers;
 
+use std::{
+    time::{
+        Duration
+    }
+};
 use tokio::{
     runtime::{
         Builder
@@ -96,6 +101,7 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
             .expect("Ctrc + C wait failed");
         finish_sender.send(())
             .expect("Stof signal send failed");
+        println!("\nStop scheduled, please wait...\nand wait...\nandwait...");
     });
     finish_receiver
 }
@@ -105,7 +111,11 @@ async fn async_main() -> Result<(), AppError> {
     // TODO: Поддержка просто файла
     let url_string = std::env::var("M3U_URL").expect("Playlist url needed");
 
-    let http_client = Client::new();
+    // TODO: Завершение стрима
+    let http_client = Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("Http client build failed");
 
     // Парсим урл на базовый плейлист
     let master_playlist_url = Url::parse(&url_string)?;
