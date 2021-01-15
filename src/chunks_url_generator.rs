@@ -35,7 +35,7 @@ async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -
     Ok(chunks_info)
 }
 
-pub type UrlGeneratorResult = Result<MediaSegment, AppError>;
+pub type UrlGeneratorResult = Result<Vec<MediaSegment>, AppError>;
 
 pub fn run_url_generator(http_client: Client, 
                          info_url: Url, 
@@ -49,15 +49,23 @@ pub fn run_url_generator(http_client: Client,
             }
 
             let playlist = media_segments_for_url(&http_client, &info_url).await?;
+            println!("Playlist data: {:#?}", playlist);
+
             let mut seq = playlist.media_sequence;
+            let mut results = vec![];
             for segment in playlist.segments.into_iter() {
                 if seq > previous_last_segment{
+                    if seq > (previous_last_segment+1) {
+                        println!("!!!! SEGMENT SKIPPED !!!!");    
+                    }
                     println!("Yield segment");
-                    yield segment;
+                    // yield segment;
+                    results.push(segment);
                     previous_last_segment = seq;
                 }
                 seq += 1;
             }
+            yield results;
 
             // TODO: Вариант лучше?
             let sleep_time = playlist.target_duration / 4.0 * 1000.0;

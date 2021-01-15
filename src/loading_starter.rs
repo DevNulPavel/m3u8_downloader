@@ -22,8 +22,8 @@ use super::{
     error::{
         AppError
     },
-    chunks_url_generator::{
-        UrlGeneratorResult
+    segments_stream_to_segment::{
+        MediaResult
     }
 };
 
@@ -45,7 +45,7 @@ pub fn run_loading_stream<S>(http_client: Client,
                              base_url: Url, 
                              segments_receiver: S) -> impl Stream<Item=LoadingResult> 
 where
-    S: Stream<Item=UrlGeneratorResult>
+    S: Stream<Item=MediaResult>
 {
     let stream = try_stream!(
         tokio::pin!(segments_receiver);

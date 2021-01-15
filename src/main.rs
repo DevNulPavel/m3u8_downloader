@@ -1,6 +1,7 @@
 mod app_arguments;
 mod error;
 mod chunks_url_generator;
+mod segments_stream_to_segment;
 mod loading_starter;
 mod load_stream_to_bytes;
 mod receivers;
@@ -57,6 +58,9 @@ use self::{
     load_stream_to_bytes::{
         loading_stream_to_bytes
     },
+    segments_stream_to_segment::{
+        segments_vec_to_segment
+    },
     receivers::{
         DataReceiver,
         start_file_receiver,
@@ -112,6 +116,7 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
 
 
 async fn async_main() -> Result<(), AppError> {
+    // TODO: Поддержка просто файла
     let url_string = std::env::var("M3U_URL").expect("Playlist url needed");
 
     let http_client = Client::new();
@@ -141,12 +146,13 @@ async fn async_main() -> Result<(), AppError> {
         
     // Цепочка из стримов обработки
     let segments_receiver = run_url_generator(http_client.clone(), stream_chunks_url, finish_receiver);
-    let loaders_stream = run_loading_stream(http_client.clone(), base_url, segments_receiver);
+    let media_stream = segments_vec_to_segment(segments_receiver);
+    let loaders_stream = run_loading_stream(http_client.clone(), base_url, media_stream);
     let bytes_stream = loading_stream_to_bytes(loaders_stream);
 
     // Выдаем в результаты
     let receivers = vec![
-        start_mpv_receiver(),   // MPV
+        //start_mpv_receiver(),   // MPV
         start_file_receiver(),  // File
     ];
 
