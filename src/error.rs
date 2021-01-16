@@ -50,6 +50,11 @@ quick_error!{
             display(x) -> ("I/O: {}", err)
         }
 
+        /// Chunks receive timeout
+        Timeout(err: tokio::time::error::Elapsed) {
+            from()
+        }
+
         /// File error
         FileError(filename: PathBuf, err: io::Error) {
             context(path: &'a Path, err: io::Error) -> (path.to_path_buf(), err)

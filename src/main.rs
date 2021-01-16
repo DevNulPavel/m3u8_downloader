@@ -91,6 +91,10 @@ async fn request_master_playlist(http_client: &Client, url: Url) -> Result<Maste
 }
 
 fn select_stream(playlist: MasterPlaylist, quality_type: StreamQuality) -> Result<VariantStream, AppError> {
+    if playlist.variants.len() == 0{
+        return Err(AppError::MasterStreamIsEmpty);
+    }
+
     match quality_type {
         StreamQuality::Maximum => {
             playlist

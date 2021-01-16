@@ -44,7 +44,6 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
 
     let data = http_client
         .get(url)
-        .timeout(Duration::from_secs(30))
         .send()
         .await?
         .bytes()

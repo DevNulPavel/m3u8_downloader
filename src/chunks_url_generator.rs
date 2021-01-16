@@ -6,9 +6,15 @@ use std::{
 use tokio::{
     sync::{
         oneshot,
+    },
+    time::{
+        timeout
     }
 };
 use futures::{
+    future::{
+        FutureExt
+    },
     stream::{
         StreamExt,
         Stream,
@@ -35,7 +41,6 @@ use super::{
 async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -> Result<MediaPlaylist, AppError> {
     let chunks_data = http_client
         .get(stream_chunks_url.as_ref())
-        .timeout(Duration::from_secs(30))
         .send()
         .await?
         .bytes()
@@ -59,7 +64,10 @@ pub fn run_url_generator(http_client: Client,
                 break;
             }
 
-            let playlist = media_segments_for_url(&http_client, &info_url).await?;
+            // Оборачиваем целиком запрос в таймаут, так как стандартный из Request не хочет работать
+            let load_future = timeout(Duration::from_secs(30), media_segments_for_url(&http_client, &info_url));
+
+            let playlist = load_future.await??;
             // println!("Playlist data: {:#?}", playlist);
 
             let mut seq = playlist.media_sequence;
