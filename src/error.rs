@@ -38,6 +38,12 @@ use quick_error::{
 quick_error!{
     #[derive(Debug)]
     pub enum AppError {
+        /// Invalid stream index
+        WrongStreamIndex(index: u8) {
+            from()
+            display(x) -> ("Wrong stream index: {}", index)
+        }
+
         /// IO Error
         IoError(err: std::io::Error) {
             from()

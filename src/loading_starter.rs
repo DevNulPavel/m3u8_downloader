@@ -40,6 +40,8 @@ use super::{
 async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
     println!("Loading started");
 
+    // TODO: Приоритезация первой загрузки в очереди
+
     let data = http_client
         .get(url)
         .timeout(Duration::from_secs(30))

@@ -25,15 +25,20 @@ use super::{
 };
 
 
-pub fn start_file_receiver() -> DataReceiver {
+pub fn start_file_receiver(path: Option<String>) -> DataReceiver {
     let (sender, mut file_receiver) = mpsc::channel::<Bytes>(10);
     let join = spawn(async move{
-        let date_str = {
-            let now = Local::now();
-            format!("{}.ts", now.format("%Y-%m-%d %H:%M:%S")) // TODO: Почему / вместо :
+        let file_path_str = match path {
+            Some(path) => {
+                path
+            },
+            None => {
+                let now = Local::now();
+                format!("{}.ts", now.format("%Y-%m-%d %H:%M:%S")) // TODO: Почему / вместо :
+            }
         };
 
-        let mut file = File::create(date_str).await?;
+        let mut file = File::create(file_path_str).await?;
         while let Some(data) = file_receiver.recv().await{
             println!("Saved to file");
             file.write_all(&data).await?;

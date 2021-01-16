@@ -41,6 +41,12 @@ use self::{
     error::{
         AppError
     },
+    app_arguments::{
+        parse_arguments,
+        AppArguments,
+        Action,
+        StreamQuality
+    },
     chunks_url_generator::{
         run_url_generator
     },
@@ -84,13 +90,32 @@ async fn request_master_playlist(http_client: &Client, url: Url) -> Result<Maste
     Ok(playlist_info)
 }
 
-fn select_stream(playlist: MasterPlaylist) -> Result<VariantStream, AppError> {
+fn select_stream(playlist: MasterPlaylist, quality_type: StreamQuality) -> Result<VariantStream, AppError> {
+    match quality_type {
+        StreamQuality::Maximum => {
+            playlist
+                .variants
+                .last()
+                .cloned() // TODO: Приходится клонировать, так как не получить итем во владение
+                .ok_or(AppError::MasterStreamIsEmpty)
+        },
+        StreamQuality::Specific(index) => {
+            playlist
+                .variants
+                .get(index as usize)
+                .cloned() // TODO: Приходится клонировать, так как не получить итем во владение
+                .ok_or(AppError::WrongStreamIndex(index))
+        },
+        StreamQuality::Select => {
+            // TODO: !!!
+            playlist
+                .variants
+                .last()
+                .cloned() // TODO: Приходится клонировать, так как не получить итем во владение
+                .ok_or(AppError::MasterStreamIsEmpty)
+        }
+    }
     // TODO: Интерактивный выбор стрима
-    playlist
-        .variants
-        .into_iter()
-        .last()
-        .ok_or(AppError::MasterStreamIsEmpty)
 }
 
 fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
@@ -101,7 +126,7 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
             .expect("Ctrc + C wait failed");
         finish_sender.send(())
             .expect("Stof signal send failed");
-        println!("\nStop scheduled, please wait...\nand wait...\nandwait...");
+        println!("\nStop scheduled, please wait...\n...and wait...\n...and wait again...");
     });
     finish_receiver
 }
@@ -109,7 +134,8 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
 
 async fn async_main() -> Result<(), AppError> {
     // TODO: Поддержка просто файла
-    let url_string = std::env::var("M3U_URL").expect("Playlist url needed");
+
+    let app_arguments = parse_arguments();
 
     // TODO: Завершение стрима
     let http_client = Client::builder()
@@ -118,7 +144,7 @@ async fn async_main() -> Result<(), AppError> {
         .expect("Http client build failed");
 
     // Парсим урл на базовый плейлист
-    let master_playlist_url = Url::parse(&url_string)?;
+    let master_playlist_url = Url::parse(&app_arguments.input)?;
     println!("Main playlist url: {}", master_playlist_url);
 
     // Отбрасываем ссылку на файли плейлиста и получаем базовый URL запросов
@@ -129,8 +155,17 @@ async fn async_main() -> Result<(), AppError> {
     let master_playlist = request_master_playlist(&http_client, master_playlist_url).await?;
     // println!("{:#?}", master_playlist);
 
+    // Если надо лишь отобразить список стримов - просто отображаем стримы
+    let download_info = match app_arguments.action {
+        Action::List => {
+            // TODO: Display streams info
+            return Ok(());
+        },
+        Action::Download(info) => info
+    };
+
     // Выбираем конкретный тип стрима
-    let stream_info = select_stream(master_playlist)?;
+    let stream_info = select_stream(master_playlist, download_info.stream_quality_value)?;
     // println!("{:#?}", stream_info);
 
     // Получаем урл для информации о чанках
@@ -147,10 +182,16 @@ async fn async_main() -> Result<(), AppError> {
     let bytes_stream = loading_stream_to_bytes(loaders_stream);
 
     // Выдаем в результаты
-    let receivers = vec![
-        start_mpv_receiver(),   // MPV
-        start_file_receiver(),  // File
-    ];
+    let receivers = if download_info.mpv {
+        vec![
+            start_mpv_receiver(),   // MPV
+            start_file_receiver(download_info.output_file),  // File
+        ]
+    }else{
+        vec![
+            start_file_receiver(download_info.output_file),  // File
+        ]
+    };
 
     // Обработка данных и отдача
     let mut found_error = None;
