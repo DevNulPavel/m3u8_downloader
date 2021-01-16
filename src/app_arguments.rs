@@ -70,18 +70,18 @@ pub fn parse_arguments() -> AppArguments {
             .default_value("maximum")
             .possible_values(&[
                 "select",
-                "specific",
+                "set",
                 "maximum"
             ])
             .help("Stream quality setup")
             .takes_value(true))
-        .arg(Arg::with_name("specific_quality_value")
-            .short("sqv")
-            .long("specific_quality_value")
-            .help("Stream quality value if 'specific' value present")
+        .arg(Arg::with_name("set_quality_value")
+            .short("s")
+            .long("set_quality_value")
+            .help("Stream quality value if 'set' value present")
             .takes_value(true)
             .next_line_help(true)
-            .requires_if("quality", "specific"))
+            .requires_if("quality", "set"))
         .get_matches();
 
     let input = matches.value_of("input")
@@ -106,10 +106,10 @@ pub fn parse_arguments() -> AppArguments {
     let stream_quality_value = match matches.value_of("quality").unwrap() {
         "maximum" => StreamQuality::Maximum,
         "select" => StreamQuality::Select,
-        "specific" => {
+        "set" => {
             let quality = matches
-                .value_of("specific_quality_value")
-                .expect("specific_quality_value must be present")
+                .value_of("set_quality_value")
+                .expect("set_quality_value must be present")
                 .parse::<u8>()
                 .expect("Stream quality value must be number value between <0-255>");
             StreamQuality::Specific(quality)
