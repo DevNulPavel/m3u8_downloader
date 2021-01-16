@@ -67,21 +67,8 @@ pub fn parse_arguments() -> AppArguments {
             .short("q")
             .long("quality")
             .next_line_help(true)
-            .default_value("maximum")
-            .possible_values(&[
-                "select",
-                "set",
-                "maximum"
-            ])
-            .help("Stream quality setup")
+            .help("Stream quality setup (max default): max / select / <quality_index>")
             .takes_value(true))
-        .arg(Arg::with_name("set_quality_value")
-            .short("s")
-            .long("set_quality_value")
-            .help("Stream quality value if 'set' value present")
-            .takes_value(true)
-            .next_line_help(true)
-            .requires_if("quality", "set"))
         .get_matches();
 
     let input = matches.value_of("input")
@@ -103,19 +90,20 @@ pub fn parse_arguments() -> AppArguments {
         .map(|v| v.to_owned());
     let mpv = matches
         .is_present("mpv");
-    let stream_quality_value = match matches.value_of("quality").unwrap() {
-        "maximum" => StreamQuality::Maximum,
-        "select" => StreamQuality::Select,
-        "set" => {
-            let quality = matches
-                .value_of("set_quality_value")
-                .expect("set_quality_value must be present")
-                .parse::<u8>()
-                .expect("Stream quality value must be number value between <0-255>");
-            StreamQuality::Specific(quality)
+    let stream_quality_value = match matches.value_of("quality") {
+        Some(val) =>{
+            match val {
+                "max" => StreamQuality::Maximum,
+                "select" => StreamQuality::Select,
+                val => {
+                    let index = val.parse::<u8>()
+                        .expect("Stream quality value must be integer");
+                    StreamQuality::Specific(index)
+                }
+            }
         },
-        _ => {
-            panic!("Unspecified quality value");
+        None => {
+            StreamQuality::Maximum
         }
     };
 

@@ -90,6 +90,26 @@ async fn request_master_playlist(http_client: &Client, url: Url) -> Result<Maste
     Ok(playlist_info)
 }
 
+fn print_stream_variants(playlist: &MasterPlaylist) {
+    playlist
+        .variants
+        .iter()
+        .enumerate()
+        .for_each(|(i, val)|{
+            match (&val.resolution, &val.frame_rate){
+                (Some(res), Some(rate)) => {
+                    println!("{}: {} {}fps", i, res, rate);
+                },
+                (Some(res), None) => {
+                    println!("{}: {}", i, res);
+                },
+                _ => {
+                    println!("{}: ?", i);
+                }
+            }
+        });
+}
+
 fn select_stream(playlist: MasterPlaylist, quality_type: StreamQuality) -> Result<VariantStream, AppError> {
     if playlist.variants.len() == 0{
         return Err(AppError::MasterStreamIsEmpty);
@@ -111,15 +131,32 @@ fn select_stream(playlist: MasterPlaylist, quality_type: StreamQuality) -> Resul
                 .ok_or(AppError::WrongStreamIndex(index))
         },
         StreamQuality::Select => {
-            // TODO: !!!
+            let count = playlist.variants.len() as u8;
+            print_stream_variants(&playlist);
+
+            let index = loop {
+                let mut text = String::new();
+                let length = std::io::stdin().read_line(&mut text)?;
+                if length == 0 {
+                    println!("Zero length, input value must be from 0 to {}", count-1);
+                    continue;
+                }
+                match text.trim().parse::<u8>(){
+                    Ok(val) if (val < count) => {
+                        break val; 
+                    },
+                    _ => {
+                        println!("Input value must be from 0 to {}", count-1);
+                    }
+                }
+            };
             playlist
                 .variants
-                .last()
-                .cloned() // TODO: Приходится клонировать, так как не получить итем во владение
-                .ok_or(AppError::MasterStreamIsEmpty)
+                .get(index as usize)
+                .cloned()   // TODO: Приходится клонировать, так как не получить итем во владение
+                .ok_or(AppError::WrongStreamIndex(index))
         }
     }
-    // TODO: Интерактивный выбор стрима
 }
 
 fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
@@ -162,7 +199,7 @@ async fn async_main() -> Result<(), AppError> {
     // Если надо лишь отобразить список стримов - просто отображаем стримы
     let download_info = match app_arguments.action {
         Action::List => {
-            // TODO: Display streams info
+            print_stream_variants(&master_playlist);
             return Ok(());
         },
         Action::Download(info) => info
