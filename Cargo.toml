@@ -4,6 +4,8 @@ version = "1.0.0"
 authors = ["DevNul <devnulpavel@gmail.com>"]
 edition = "2018"
 description = "Application for downloading m3u8 HLS streams"
+license = "mit"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
