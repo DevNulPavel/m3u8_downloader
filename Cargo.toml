@@ -3,6 +3,7 @@ name = "m3u8_downloader"
 version = "1.0.0"
 authors = ["DevNul <devnulpavel@gmail.com>"]
 edition = "2018"
+description = "Application for downloading m3u8 HLS streams"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,7 +11,7 @@ edition = "2018"
 quick-error = "2.0.0"
 reqwest = { version = "0.11.0", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "1.0.2", default-features = false, features = ["fs", "rt", "rt-multi-thread", "net", "sync", "signal", "process", "macros"]}
-futures = "0.3.9"
+futures = "0.3.12"
 url = "2.2.0"
 m3u8-rs = "1.0.7"
 nom = "5.1.2"
