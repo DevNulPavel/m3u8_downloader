@@ -7,7 +7,7 @@ description = "Application for downloading m3u8 HLS streams"
 license = "mit"
 homepage = "https://github.com/DevNulPavel/m3u8_downloader"
 repository = "https://github.com/DevNulPavel/m3u8_downloader"
-documentation = "m3u8_download --help"
+documentation = "https://github.com/DevNulPavel/m3u8_downloader"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
