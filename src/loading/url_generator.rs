@@ -74,7 +74,7 @@ pub fn run_url_generator(http_client: Client,
             for segment in playlist.segments.into_iter() {
                 if seq > previous_last_segment{
                     if (previous_last_segment > 0) && (seq > (previous_last_segment+1)) {
-                        error!("!!!! SEGMENT SKIPPED !!!!");    
+                        error!("SEGMENT SKIPPED");    
                     }
                     debug!("Yield segment");
                     // yield segment;

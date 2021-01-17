@@ -78,6 +78,8 @@ pub fn start_mpv_receiver(verbose: VerboseLevel) -> DataReceiver {
         match verbose{
             VerboseLevel::None | VerboseLevel::Medium => {
                 builder
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
                     .arg("--quiet")
                     .arg("--really-quiet");
             },

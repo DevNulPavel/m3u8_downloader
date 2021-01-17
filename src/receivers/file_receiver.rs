@@ -42,7 +42,11 @@ pub fn start_file_receiver(path: Option<String>) -> DataReceiver {
 
         // TODO: Print total data size
 
-        let mut file = File::create(file_path_str).await?;
+        
+        let mut file = File::create(&file_path_str).await?;
+        info!("Result file '{}' opened", file_path_str);
+        drop(file_path_str);
+
         while let Some(data) = file_receiver.recv().await{
             debug!("Saved to file");
             file.write_all(&data).await?;

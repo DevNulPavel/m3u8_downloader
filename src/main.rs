@@ -2,6 +2,7 @@ mod app_arguments;
 mod error;
 mod loading;
 mod receivers;
+mod logs;
 
 use std::{
     time::{
@@ -37,6 +38,9 @@ use m3u8_rs::{
     }
 };
 use self::{
+    logs::{
+        setup_logs
+    },
     error::{
         AppError
     },
@@ -54,26 +58,6 @@ use self::{
         start_mpv_receiver
     }
 };
-
-fn setup_logs(verbose: &VerboseLevel){
-    match verbose {
-        VerboseLevel::None => {
-            pretty_env_logger::formatted_builder()
-                .filter_module("m3u8_downloader", log::LevelFilter::Error)
-                .init();
-        },
-        VerboseLevel::Medium => {
-            pretty_env_logger::formatted_builder()
-                .filter_module("m3u8_downloader", log::LevelFilter::Debug)
-                .init();
-        },
-        VerboseLevel::Max => {
-            pretty_env_logger::formatted_builder()
-                .filter_module("m3u8_downloader", log::LevelFilter::Trace)
-                .init();
-        }
-    }
-}
 
 fn base_url_from_master_playlist_url(url: Url) -> Result<Url, AppError>{
     let mut base_url = url.clone();
@@ -199,11 +183,11 @@ async fn async_main() -> Result<(), AppError> {
 
     // Парсим урл на базовый плейлист
     let master_playlist_url = Url::parse(&app_arguments.input)?;
-    info!("Main playlist url: {}", master_playlist_url);
+    debug!("Main playlist url: {}", master_playlist_url);
 
     // Отбрасываем ссылку на файли плейлиста и получаем базовый URL запросов
     let base_url = base_url_from_master_playlist_url(master_playlist_url.clone())?;
-    info!("Base url: {}", base_url);
+    debug!("Base url: {}", base_url);
 
     // Получаем информацию о плейлисте
     let master_playlist = request_master_playlist(&http_client, master_playlist_url).await?;
@@ -224,7 +208,7 @@ async fn async_main() -> Result<(), AppError> {
 
     // Получаем урл для информации о чанках
     let stream_chunks_url = base_url.join(&stream_info.uri)?;
-    info!("Chunks info url: {}", stream_chunks_url);
+    debug!("Chunks info url: {}", stream_chunks_url);
 
     // Получаем канал о прерывании работы
     let finish_receiver = run_interrupt_awaiter();
@@ -258,7 +242,7 @@ async fn async_main() -> Result<(), AppError> {
             }
         };
 
-        println!("Chunk received: {}kB", data.len() / 1024);
+        info!("Chunk received: {}kB", data.len() / 1024);
 
         // Отдаем получателям
         let futures_iter = receivers
@@ -286,7 +270,7 @@ async fn async_main() -> Result<(), AppError> {
         receiver.stop_and_wait_finish().await?;
     }
 
-    info!("All receivers finished");
+    info!("All data receivers finished");
 
     match found_error{
         Some(err) => Err(err),
