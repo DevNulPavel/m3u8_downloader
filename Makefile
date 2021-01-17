@@ -20,3 +20,6 @@ DEPLOY: ARM64_RELEASE X64_RELEASE
 	cd target/release_universal && \
 	tar -czf m3u8_downloader-universal.tar.gz m3u8_downloader && \
 	shasum -a 256 m3u8_downloader-universal.tar.gz
+
+AUDID:
+	brew audit --strict --online m3u8_downloader
