@@ -1,7 +1,5 @@
 use chrono::{
-    Utc,
-    Local,
-    DateTime
+    Local
 };
 use tokio::{
     sync::{
@@ -14,6 +12,10 @@ use tokio::{
         File
     },
     spawn
+};
+use log::{
+    debug,
+    info
 };
 use bytes::{
     Bytes
@@ -42,11 +44,11 @@ pub fn start_file_receiver(path: Option<String>) -> DataReceiver {
 
         let mut file = File::create(file_path_str).await?;
         while let Some(data) = file_receiver.recv().await{
-            println!("Saved to file");
+            debug!("Saved to file");
             file.write_all(&data).await?;
         }
         file.sync_all().await?;
-        println!("File write stopped");
+        info!("File write stopped");
         Ok(())
     });
 

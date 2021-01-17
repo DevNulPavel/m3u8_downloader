@@ -12,19 +12,18 @@ use tokio::{
     }
 };
 use futures::{
-    future::{
-        FutureExt
-    },
     stream::{
-        StreamExt,
-        Stream,
-        TryStream,
-        TryStreamExt
+        TryStream
     }
 };
 use reqwest::{
     Client,
     Url
+};
+use log::{
+    debug,
+    error,
+    trace
 };
 use m3u8_rs::{
     playlist::{
@@ -32,7 +31,7 @@ use m3u8_rs::{
         MediaSegment
     }
 };
-use super::{
+use crate::{
     error::{
         AppError
     }
@@ -60,7 +59,7 @@ pub fn run_url_generator(http_client: Client,
         let mut previous_last_segment = 0;
         loop {
             if stop_receiver.try_recv().is_ok(){
-                println!("Stop received");
+                debug!("Stop received");
                 break;
             }
 
@@ -68,16 +67,16 @@ pub fn run_url_generator(http_client: Client,
             let load_future = timeout(Duration::from_secs(30), media_segments_for_url(&http_client, &info_url));
 
             let playlist = load_future.await??;
-            // println!("Playlist data: {:#?}", playlist);
+            trace!("Playlist data: {:#?}", playlist);
 
             let mut seq = playlist.media_sequence;
             let mut results = vec![];
             for segment in playlist.segments.into_iter() {
                 if seq > previous_last_segment{
                     if (previous_last_segment > 0) && (seq > (previous_last_segment+1)) {
-                        println!("!!!! SEGMENT SKIPPED !!!!");    
+                        error!("!!!! SEGMENT SKIPPED !!!!");    
                     }
-                    println!("Yield segment");
+                    debug!("Yield segment");
                     // yield segment;
                     results.push(segment);
                     previous_last_segment = seq;

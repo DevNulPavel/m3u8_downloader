@@ -22,10 +22,18 @@ use tokio::{
 use bytes::{
     Bytes
 };
+use log::{
+    debug,
+    info,
+    error
+};
+use crate::{
+    VerboseLevel
+};
 use super::{
     receiver::{
         DataReceiver
-    }
+    },
 };
 
 async fn read_from<O>(input: O, limit: u8, prefix: &str)
@@ -44,36 +52,44 @@ where
             continue;
         }
         let text = std::str::from_utf8(&buffer[0..read]).unwrap().trim();
-        println!("{}: {}", prefix, text);
+        debug!("{}: {}", prefix, text); // TODO: As error
         buffer.clear();
     }
-    println!("MPV READ EXIT");
+    debug!("MPV READ EXIT");
 }
 
-pub fn start_mpv_receiver() -> DataReceiver {
+pub fn start_mpv_receiver(verbose: VerboseLevel) -> DataReceiver {
+    // TODO: Передача параметров в MPV извне
     // Mpv
     let (sender, mut mpv_receiver) = mpsc::channel::<Bytes>(40);
     let join = spawn(async move{
         // TODO: Разобраться с предварительным кешированием
-        let mut child = Command::new("mpv")
+        let mut builder = Command::new("mpv");
+        builder
             .args(&[
                 "--no-osd-bar",
                 "--cache=yes",
                 "--stream-buffer-size=128MiB",
                 "--demuxer-max-bytes=128MiB",
                 "--demuxer-max-back-bytes=128MiB",
-                "--quiet",
-                "--really-quiet",
-                // "-loglevel", "panic",
                 // "--cache-secs=60",
-                "-"
             ])
-            .stdin(Stdio::piped())
-            // .stdout(Stdio::piped())
-            // .stderr(Stdio::piped())
-            .spawn()?;
+            .stdin(Stdio::piped());
+        match verbose{
+            VerboseLevel::None | VerboseLevel::Medium => {
+                builder
+                    .arg("--quiet")
+                    .arg("--really-quiet");
+            },
+            VerboseLevel::Max => {
+                builder
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+            },
+        }
+        let mut child = builder.arg("-").spawn()?;
         {
-            println!("MPV spawned");
+            info!("MPV spawned");
             let Child{stderr, stdin, stdout, ..} = &mut child;
             let (read_f, read_abort) = futures::future::abortable(async move {
                 if let Some(ref mut output) = stdout {
@@ -89,13 +105,13 @@ pub fn start_mpv_receiver() -> DataReceiver {
                 if let Some(ref mut input) = stdin {
                     while let Some(data) = mpv_receiver.recv().await{
                         // При закрытии MPV просто прерываем обработку, не считаем за ошибку
-                        println!("Send data to mpv");
                         if input.write_all(&data).await.is_err(){
                             break;
                         }
+                        debug!("MPV received data");
                     }
                 }else{
-                    println!("MPV no stdin");
+                    error!("MPV no stdin");
                 }
                 read_abort.abort();
                 err_abort.abort();
@@ -103,7 +119,7 @@ pub fn start_mpv_receiver() -> DataReceiver {
             let _ = futures::future::join3(read_f, err_f, write_f).await;
         }
         child.kill().await?;
-        println!("MPV stopped");
+        info!("MPV stopped");
 
         Ok(())
     });

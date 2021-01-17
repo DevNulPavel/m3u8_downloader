@@ -1,9 +1,6 @@
 mod app_arguments;
 mod error;
-mod chunks_url_generator;
-mod segments_stream_to_segment;
-mod loading_starter;
-mod load_stream_to_bytes;
+mod loading;
 mod receivers;
 
 use std::{
@@ -23,13 +20,15 @@ use tokio::{
 };
 use futures::{
     StreamExt,
-    Stream,
-    TryStream,
     TryStreamExt
 };
 use reqwest::{
     Client,
     Url
+};
+use log::{
+    debug,
+    info
 };
 use m3u8_rs::{
     playlist::{
@@ -43,27 +42,38 @@ use self::{
     },
     app_arguments::{
         parse_arguments,
-        AppArguments,
         Action,
-        StreamQuality
+        StreamQuality,
+        VerboseLevel
     },
-    chunks_url_generator::{
-        run_url_generator
-    },
-    loading_starter::{
-        run_loading_stream
-    },
-    load_stream_to_bytes::{
-        loading_stream_to_bytes
-    },
-    segments_stream_to_segment::{
-        segments_vec_to_segment
+    loading::{
+        run_loading
     },
     receivers::{
         start_file_receiver,
         start_mpv_receiver
     }
 };
+
+fn setup_logs(verbose: &VerboseLevel){
+    match verbose {
+        VerboseLevel::None => {
+            pretty_env_logger::formatted_builder()
+                .filter_module("m3u8_downloader", log::LevelFilter::Error)
+                .init();
+        },
+        VerboseLevel::Medium => {
+            pretty_env_logger::formatted_builder()
+                .filter_module("m3u8_downloader", log::LevelFilter::Debug)
+                .init();
+        },
+        VerboseLevel::Max => {
+            pretty_env_logger::formatted_builder()
+                .filter_module("m3u8_downloader", log::LevelFilter::Trace)
+                .init();
+        }
+    }
+}
 
 fn base_url_from_master_playlist_url(url: Url) -> Result<Url, AppError>{
     let mut base_url = url.clone();
@@ -166,8 +176,8 @@ fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
             .await
             .expect("Ctrc + C wait failed");
         finish_sender.send(())
-            .expect("Stof signal send failed");
-        println!("\nStop scheduled, please wait...\n...and wait...\n...and wait again...");
+            .expect("Stop signal send failed");
+        println!("\nStop scheduled, please wait...\n...and wait...\n...and wait again...\n");
     });
     finish_receiver
 }
@@ -178,6 +188,9 @@ async fn async_main() -> Result<(), AppError> {
 
     let app_arguments = parse_arguments();
 
+    // Logs
+    setup_logs(&app_arguments.verbose);
+
     // TODO: Завершение стрима
     let http_client = Client::builder()
         .timeout(Duration::from_secs(60))
@@ -186,15 +199,15 @@ async fn async_main() -> Result<(), AppError> {
 
     // Парсим урл на базовый плейлист
     let master_playlist_url = Url::parse(&app_arguments.input)?;
-    println!("Main playlist url: {}", master_playlist_url);
+    info!("Main playlist url: {}", master_playlist_url);
 
     // Отбрасываем ссылку на файли плейлиста и получаем базовый URL запросов
     let base_url = base_url_from_master_playlist_url(master_playlist_url.clone())?;
-    println!("Base url: {}", base_url);
+    info!("Base url: {}", base_url);
 
     // Получаем информацию о плейлисте
     let master_playlist = request_master_playlist(&http_client, master_playlist_url).await?;
-    // println!("{:#?}", master_playlist);
+    debug!("{:#?}", master_playlist);
 
     // Если надо лишь отобразить список стримов - просто отображаем стримы
     let download_info = match app_arguments.action {
@@ -207,25 +220,22 @@ async fn async_main() -> Result<(), AppError> {
 
     // Выбираем конкретный тип стрима
     let stream_info = select_stream(master_playlist, download_info.stream_quality_value)?;
-    // println!("{:#?}", stream_info);
+    debug!("{:#?}", stream_info);
 
     // Получаем урл для информации о чанках
     let stream_chunks_url = base_url.join(&stream_info.uri)?;
-    println!("Chunks info url: {}", stream_chunks_url);
+    info!("Chunks info url: {}", stream_chunks_url);
 
     // Получаем канал о прерывании работы
     let finish_receiver = run_interrupt_awaiter();
         
     // Цепочка из стримов обработки
-    let segments_receiver = run_url_generator(http_client.clone(), stream_chunks_url, finish_receiver);
-    let media_stream = segments_vec_to_segment(segments_receiver);
-    let loaders_stream = run_loading_stream(http_client.clone(), base_url, media_stream);
-    let bytes_stream = loading_stream_to_bytes(loaders_stream);
+    let bytes_stream = run_loading(http_client, base_url, stream_chunks_url, finish_receiver);
 
     // Выдаем в результаты
     let receivers = if download_info.mpv {
         vec![
-            start_mpv_receiver(),   // MPV
+            start_mpv_receiver(app_arguments.verbose),   // MPV
             start_file_receiver(download_info.output_file),  // File
         ]
     }else{
@@ -248,6 +258,8 @@ async fn async_main() -> Result<(), AppError> {
             }
         };
 
+        println!("Chunk received: {}kB", data.len() / 1024);
+
         // Отдаем получателям
         let futures_iter = receivers
             .iter()
@@ -267,16 +279,14 @@ async fn async_main() -> Result<(), AppError> {
         }
     }
 
-    println!("Loading loop finished");
+    info!("Loading loop finished");
 
     // Wait all finish
     for receiver in receivers.into_iter(){
-        if let Err(err) = receiver.stop_and_wait_finish().await{
-            println!("Receiver stop error: {}", err);
-        }
+        receiver.stop_and_wait_finish().await?;
     }
 
-    println!("All receivers finished");
+    info!("All receivers finished");
 
     match found_error{
         Some(err) => Err(err),

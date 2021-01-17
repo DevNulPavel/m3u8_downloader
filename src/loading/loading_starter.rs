@@ -1,20 +1,16 @@
-use std::{
-    time::{
-        Duration
-    }
-};
 use tokio::{
     task::{
         JoinHandle,
-        JoinError
     },
     spawn,
 };
 use futures::{
-    Stream, 
     StreamExt,
     TryStream,
     TryStreamExt
+};
+use log::{
+    debug
 };
 use bytes::{
     Bytes
@@ -31,14 +27,14 @@ use m3u8_rs::{
 use async_stream::{
     try_stream
 };
-use super::{
+use crate::{
     error::{
         AppError
     }
 };
 
 async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
-    println!("Loading started");
+    debug!("Loading started");
 
     // TODO: Приоритезация первой загрузки в очереди
 
@@ -69,7 +65,7 @@ where
         while let Some(segment) = segments_receiver.try_next().await?{
             let http_client = http_client.clone();
             let loading_url = base_url.join(&segment.uri)?;
-            // println!("Chunk url: {}", loading_url);
+            debug!("Chunk url: {}", loading_url);
 
             let join = spawn(load_chunk(http_client, loading_url));
             

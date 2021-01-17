@@ -1,7 +1,5 @@
 use futures::{
     stream::{
-        Stream,
-        StreamExt,
         TryStream,
         TryStreamExt
     }
@@ -14,15 +12,11 @@ use m3u8_rs::{
         MediaSegment
     }
 };
-use super::{
+use crate::{
     error::{
         AppError
-    },
-    chunks_url_generator::{
-        UrlGeneratorResult
     }
 };
-
 
 pub fn segments_vec_to_segment<S>(receiver: S) -> impl TryStream<Ok=MediaSegment, Error=AppError>
 where 

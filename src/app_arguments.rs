@@ -1,7 +1,6 @@
 use clap::{
     Arg, 
-    App,
-    SubCommand
+    App
 };
 
 #[derive(Debug)]
@@ -16,7 +15,6 @@ pub struct DownloadArguments {
     pub mpv: bool,
     pub output_file: Option<String>,
     pub stream_quality_value: StreamQuality
-    // TODO: Verbose
 }
 
 #[derive(Debug)]
@@ -26,8 +24,16 @@ pub enum Action {
 }
 
 #[derive(Debug)]
+pub enum VerboseLevel{
+    None,
+    Medium,
+    Max
+}
+
+#[derive(Debug)]
 pub struct AppArguments {
     pub input: String,
+    pub verbose: VerboseLevel,
     pub action: Action
 }
 
@@ -69,15 +75,35 @@ pub fn parse_arguments() -> AppArguments {
             .next_line_help(true)
             .help("Stream quality setup (max default): max / select / <quality_index>")
             .takes_value(true))
+        .arg(Arg::with_name("verbose")
+            .short("v")
+            .long("verbose")
+            .takes_value(true)
+            .default_value("0")
+            .possible_values(&[
+                "0",
+                "1",
+                "2"
+            ])
+            .help("Print additional verbose information"))            
         .get_matches();
 
     let input = matches.value_of("input")
         .map(|v| v.to_owned())
         .expect("Input is missing");        
+    let verbose = match matches.value_of("verbose").unwrap() {
+        "0" => VerboseLevel::None,
+        "1" => VerboseLevel::Medium,
+        "2" => VerboseLevel::Max,
+        _ => {
+            panic!("Invalid verbose level");
+        }
+    };
     
     if matches.is_present("list_of_specific_quality") {
         return AppArguments{
             input,
+            verbose,
             action: Action::List
         };
     }        
@@ -109,6 +135,7 @@ pub fn parse_arguments() -> AppArguments {
 
     AppArguments{
         input,
+        verbose,
         action: Action::Download(DownloadArguments{
             mpv,
             output_file,
