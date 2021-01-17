@@ -4,9 +4,6 @@ use std::{
     }
 };
 use tokio::{
-    sync::{
-        oneshot,
-    },
     time::{
         timeout
     }
@@ -53,16 +50,10 @@ async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -
 pub type UrlGeneratorResult = Vec<MediaSegment>;
 
 pub fn run_url_generator(http_client: Client, 
-                         info_url: Url, 
-                         mut stop_receiver: oneshot::Receiver<()>) -> impl TryStream<Ok=UrlGeneratorResult, Error=AppError> {
+                         info_url: Url) -> impl TryStream<Ok=UrlGeneratorResult, Error=AppError> {
     let stream = async_stream::try_stream!(
         let mut previous_last_segment = 0;
         loop {
-            if stop_receiver.try_recv().is_ok(){
-                debug!("Stop received");
-                break;
-            }
-
             // Оборачиваем целиком запрос в таймаут, так как стандартный из Request не хочет работать
             let load_future = timeout(Duration::from_secs(30), media_segments_for_url(&http_client, &info_url));
 

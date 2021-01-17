@@ -20,6 +20,11 @@ use tokio::{
     spawn,
 };
 use futures::{
+    future::{
+        Either,
+        select,
+    },
+    FutureExt,
     StreamExt,
     TryStreamExt
 };
@@ -209,12 +214,9 @@ async fn async_main() -> Result<(), AppError> {
     // Получаем урл для информации о чанках
     let stream_chunks_url = base_url.join(&stream_info.uri)?;
     debug!("Chunks info url: {}", stream_chunks_url);
-
-    // Получаем канал о прерывании работы
-    let finish_receiver = run_interrupt_awaiter();
         
     // Цепочка из стримов обработки
-    let bytes_stream = run_loading(http_client, base_url, stream_chunks_url, finish_receiver);
+    let bytes_stream = run_loading(http_client, base_url, stream_chunks_url);
 
     // Выдаем в результаты
     let receivers = if download_info.mpv {
@@ -228,11 +230,17 @@ async fn async_main() -> Result<(), AppError> {
         ]
     };
 
+    // TODO: Прерывать работу не в начале, а уже в самом конце
+    // Получаем канал о прерывании работы
+    let mut finish_receiver = run_interrupt_awaiter().into_stream();
+
     // Обработка данных и отдача
     let mut found_error = None;
     let bytes_stream = bytes_stream.into_stream();
     pin!(bytes_stream);
-    while let Some(data) = bytes_stream.next().await{
+
+    // Главный цикл
+    while let Either::Left((Some(data), _)) = select(bytes_stream.next(), finish_receiver.next()).await {
         // Отлавливаем только ошибки в стримах
         let data = match data{
             Ok(data) => data,
