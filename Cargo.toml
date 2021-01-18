@@ -1,10 +1,12 @@
 [package]
 name = "m3u8_downloader"
-version = "1.0.0"
+version = "0.5.0"
 authors = ["DevNul <devnulpavel@gmail.com>"]
 edition = "2018"
-description = "Application for downloading m3u8 HLS streams"
-license = "mit"
+description = "Application m3u8_downloader allows to download m3u8 HLS streams by master playlist link."
+license = "MIT"
+keywords = ["m3u8", "hls"]
+categories = ["video", "internet"]
 homepage = "https://github.com/DevNulPavel/m3u8_downloader"
 repository = "https://github.com/DevNulPavel/m3u8_downloader"
 documentation = "https://github.com/DevNulPavel/m3u8_downloader"

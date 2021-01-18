@@ -21,5 +21,11 @@ DEPLOY: ARM64_RELEASE X64_RELEASE
 	tar -czf m3u8_downloader-universal.tar.gz m3u8_downloader && \
 	shasum -a 256 m3u8_downloader-universal.tar.gz
 
-AUDID:
-	brew audit --strict --online m3u8_downloader
+BUILD_DOC:
+	cargo doc --open
+
+TEST_PUBLISH:
+	cargo publish --dry-run
+
+PUBLISH:
+	cargo publish

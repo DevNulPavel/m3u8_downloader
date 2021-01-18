@@ -41,7 +41,6 @@ pub fn start_file_receiver(path: Option<String>) -> DataReceiver {
         };
 
         // TODO: Print total data size
-
         
         let mut file = File::create(&file_path_str).await?;
         info!("Result file '{}' opened", file_path_str);

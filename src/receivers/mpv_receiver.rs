@@ -41,7 +41,6 @@ where
     O: AsyncRead + Unpin
 {
     let mut reader = tokio::io::BufReader::new(input);
-    // let mut buffer = String::new();
     let mut buffer = vec![];
     while let Ok(read) = reader.read_until(limit, &mut buffer).await {
         if read == 0 {

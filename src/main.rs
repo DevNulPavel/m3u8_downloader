@@ -1,3 +1,21 @@
+//! m3u8_downloader allows to download m3u8 HLS streams by master playlist link.
+//! 
+//! # Usage example
+//! 
+//! ```
+//! m3u8_downloader --help
+//! m3u8_downloader -m "<link to playlist.m3u8 file>"
+//! m3u8_downloader -m -q=sel "<link to playlist.m3u8 file>"
+//! m3u8_downloader -m -q=1 "<link to playlist.m3u8 file>"
+//! m3u8_downloader -m -v=1 "<link to playlist.m3u8 file>"
+//! ```
+//!
+//!
+//!
+//!
+//!
+
+
 mod app_arguments;
 mod error;
 mod loading;
@@ -63,6 +81,7 @@ use self::{
         start_mpv_receiver
     }
 };
+
 
 fn base_url_from_master_playlist_url(url: Url) -> Result<Url, AppError>{
     let mut base_url = url.clone();
