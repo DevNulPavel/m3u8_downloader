@@ -31,17 +31,10 @@ use tokio::{
     runtime::{
         Builder
     },
-    sync::{
-        oneshot
-    },
+    select,
     pin,
-    spawn,
 };
 use futures::{
-    future::{
-        Either,
-        select,
-    },
     FutureExt,
     StreamExt,
     TryStreamExt
@@ -95,9 +88,9 @@ fn base_url_from_master_playlist_url(url: Url) -> Result<Url, AppError>{
     Ok(base_url)
 }
 
-async fn request_master_playlist(http_client: &Client, url: Url) -> Result<MasterPlaylist, AppError>{
+async fn request_master_playlist(http_client: &Client, url: &Url) -> Result<MasterPlaylist, AppError>{
     let response = http_client
-        .get(url)
+        .get(url.clone())
         .send()
         .await?
         .bytes()
@@ -177,19 +170,35 @@ fn select_stream(playlist: MasterPlaylist, quality_type: StreamQuality) -> Resul
     }
 }
 
-fn run_interrupt_awaiter() -> oneshot::Receiver<()> {
-    let (finish_sender, finish_receiver) = tokio::sync::oneshot::channel();
-    spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Ctrc + C wait failed");
-        finish_sender.send(())
-            .expect("Stop signal send failed");
-        println!("\nStop scheduled, please wait...\n...and wait...\n...and wait again...\n");
-    });
-    finish_receiver
+async fn run_interrupt_awaiter() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Ctrc + C wait failed");
+    info!("\nStop received, please wait...\n...and wait...\n...and wait again...");
 }
 
+async fn run_stream_finish_awaiter(http_client: Client, master_playlist_url: Url) -> Result<(), AppError> {
+    // Таймауты на чанках нормально не работают, окончанием стрима можно считать пустой мастер-плейлист
+    loop {
+        // Получаем информацию о плейлисте
+        match request_master_playlist(&http_client, &master_playlist_url).await{
+            Ok(_) => {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            },
+            Err(e) => {
+                match e {
+                    AppError::MasterStreamIsEmpty => {
+                        info!("\nStream is finished :-(");
+                        return Ok(());
+                    },
+                    err @ _ =>{
+                        return Err(err);
+                    }
+                }
+            }
+        }
+    }
+}
 
 async fn async_main() -> Result<(), AppError> {
     // TODO: Поддержка просто файла
@@ -214,7 +223,7 @@ async fn async_main() -> Result<(), AppError> {
     debug!("Base url: {}", base_url);
 
     // Получаем информацию о плейлисте
-    let master_playlist = request_master_playlist(&http_client, master_playlist_url).await?;
+    let master_playlist = request_master_playlist(&http_client, &master_playlist_url).await?;
     debug!("{:#?}", master_playlist);
 
     // Если надо лишь отобразить список стримов - просто отображаем стримы
@@ -235,7 +244,7 @@ async fn async_main() -> Result<(), AppError> {
     debug!("Chunks info url: {}", stream_chunks_url);
         
     // Цепочка из стримов обработки
-    let bytes_stream = run_loading(http_client, base_url, stream_chunks_url);
+    let bytes_stream = run_loading(&http_client, base_url, stream_chunks_url);
 
     // Выдаем в результаты
     let receivers = if download_info.mpv {
@@ -250,44 +259,72 @@ async fn async_main() -> Result<(), AppError> {
     };
 
     // TODO: Прерывать работу не в начале, а уже в самом конце
-    // Получаем канал о прерывании работы
-    let mut finish_receiver = run_interrupt_awaiter().into_stream();
+    // Получаем футуры о прерывании работы
+    let interrupt_f = run_interrupt_awaiter().into_stream();
+    pin!(interrupt_f);
+    let stream_finish_f = run_stream_finish_awaiter(http_client, master_playlist_url).into_stream();
+    pin!(stream_finish_f);
 
     // Обработка данных и отдача
     let mut found_error = None;
     let bytes_stream = bytes_stream.into_stream();
     pin!(bytes_stream);
 
-    // Главный цикл
-    while let Either::Left((Some(data), _)) = select(bytes_stream.next(), finish_receiver.next()).await {
-        // Отлавливаем только ошибки в стримах
-        let data = match data{
-            Ok(data) => data,
-            Err(err) => {
-                found_error = Some(err);
-                break;
+    // Главный цикл, прерывается если в канал прилетело завершение
+    loop {
+        select! {
+            msg = interrupt_f.next() => {
+                if msg.is_some(){
+                    break;
+                }
+            },
+            msg = stream_finish_f.next() => {
+                if let Some(res) = msg {
+                    if let Err(err) = res {
+                        found_error = Some(err);
+                    }
+                    break;
+                }
+            },
+            stream_msg = bytes_stream.next() => {
+                // Если стри пустой - прерывание
+                let data = match stream_msg {
+                    Some(data) => data,
+                    None => {
+                        break;
+                    }
+                };
+
+                // Отлавливаем только ошибки в стримах
+                let data = match data{
+                    Ok(data) => data,
+                    Err(err) => {
+                        found_error = Some(err);
+                        break;
+                    }
+                };
+
+                info!("Chunk received: {}kB", data.len() / 1024);
+
+                // Отдаем получателям
+                let futures_iter = receivers
+                    .iter()
+                    .map(move |receiver| {
+                        receiver.send(data.clone())
+                    });
+                let found_err = futures::future::join_all(futures_iter)
+                    .await
+                    .into_iter()
+                    .find(|res|{
+                        res.is_err()
+                    });
+
+                // На ошибку отдачи данных просто прекращаем работу цикла
+                if found_err.is_some() {
+                    break;
+                }
             }
-        };
-
-        info!("Chunk received: {}kB", data.len() / 1024);
-
-        // Отдаем получателям
-        let futures_iter = receivers
-            .iter()
-            .map(move |receiver| {
-                receiver.send(data.clone())
-            });
-        let found_err = futures::future::join_all(futures_iter)
-            .await
-            .into_iter()
-            .find(|res|{
-                res.is_err()
-            });
-
-        // На ошибку отдачи данных просто прекращаем работу цикла
-        if found_err.is_some() {
-            break;
-        }
+        }        
     }
 
     info!("Loading loop finished");

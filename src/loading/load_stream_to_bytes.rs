@@ -49,19 +49,22 @@ where
             })
             .buffered(20); // TODO: ???
         tokio::pin!(loaders_receiver);
-        let mut total_skipped = 0;
+        let mut total_skipped: i32 = 0;
+        let mut timeout_val: i64 = 45;  // Для самого первого чанка делаем значение таймаута выше
         while let Some(data) = loaders_receiver.try_next().await?{
-            // Если не смогли получить результат одной футуры в течение 3 сек, 
+            // Если не смогли получить результат одной футуры в течение 5 сек, 
             // делаем 10 попыток на следующих - иначе все
-            match timeout(Duration::from_secs(3), data).await {
+            // C каждой итерацией уменьшаем значение таймаута для чанка
+            timeout_val = std::cmp::max(timeout_val - 5, 5);
+            match timeout(Duration::from_secs(timeout_val as u64), data).await {
                 Ok(data) => {
                     total_skipped = 0;
                     let data = data??;
                     yield data;
                 },
                 Err(_) =>{
-                    error!("Chunk await timeout: {} total", total_skipped);
                     total_skipped += 1;
+                    error!("Chunk await timeout: {} total", total_skipped);
                     if total_skipped > 10 {
                         break;
                     }
