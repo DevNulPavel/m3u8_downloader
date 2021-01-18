@@ -181,14 +181,15 @@ async fn run_stream_finish_awaiter(http_client: Client, master_playlist_url: Url
     // Таймауты на чанках нормально не работают, окончанием стрима можно считать пустой мастер-плейлист
     loop {
         // Получаем информацию о плейлисте
+        debug!("Master request accessible check");
         match request_master_playlist(&http_client, &master_playlist_url).await{
             Ok(_) => {
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
             },
             Err(e) => {
                 match e {
                     AppError::MasterStreamIsEmpty => {
-                        info!("\nStream is finished :-(");
+                        info!("\nMaster stream is finished :-(");
                         return Ok(());
                     },
                     err @ _ =>{

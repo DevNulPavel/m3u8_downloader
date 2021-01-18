@@ -1,3 +1,8 @@
+use std::{
+    time::{
+        Instant
+    }
+};
 use tokio::{
     task::{
         JoinHandle,
@@ -48,7 +53,11 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
     Ok(data)
 }
 
-pub type LoadingJoin = JoinHandle<Result<Bytes, AppError>>;
+pub struct LoadingJoin {
+    pub join: JoinHandle<Result<Bytes, AppError>>,
+    pub info: MediaSegment,
+    pub load_start_time: Instant
+}
 
 pub fn run_loading_stream<S>(http_client: Client, 
                              base_url: Url, 
@@ -69,7 +78,11 @@ where
 
             let join = spawn(load_chunk(http_client, loading_url));
             
-            yield join;
+            yield LoadingJoin{
+                join,
+                info: segment,
+                load_start_time: Instant::now()
+            };
         }
     );
     stream

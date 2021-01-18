@@ -1,6 +1,7 @@
 use std::{
     time::{
-        Duration
+        Duration,
+        Instant
     }
 };
 use futures::{
@@ -19,7 +20,8 @@ use bytes::{
     Bytes
 };
 use log::{
-    error
+    error,
+    debug
 };
 use async_stream::{
     try_stream
@@ -50,13 +52,34 @@ where
             .buffered(20); // TODO: ???
         tokio::pin!(loaders_receiver);
         let mut total_skipped: i32 = 0;
-        let mut timeout_val: i64 = 45;  // Для самого первого чанка делаем значение таймаута выше
+        let mut time_start_buffer: i32 = 3000; // Увеличение таймаута для начальных запусков
         while let Some(data) = loaders_receiver.try_next().await?{
-            // Если не смогли получить результат одной футуры в течение 5 сек, 
-            // делаем 10 попыток на следующих - иначе все
-            // C каждой итерацией уменьшаем значение таймаута для чанка
-            timeout_val = std::cmp::max(timeout_val - 5, 5);
-            match timeout(Duration::from_secs(timeout_val as u64), data).await {
+            // Если чанк уже грузился очень долго, тогда скипнем его
+            let loading_duration_at_now = Instant::now().duration_since(data.load_start_time);
+            let chunk_duration = Duration::from_millis((data.info.duration * 1000.0) as u64);
+            let timeout_val = match chunk_duration.checked_sub(loading_duration_at_now){
+                Some(v) => {
+                    v.as_millis() as u64 + time_start_buffer as u64
+                },
+                None => 0 + time_start_buffer as u64,
+            };
+
+            // Постепенно снижаем начальный буффер времени
+            time_start_buffer = if (time_start_buffer - 100) > 0 {
+                time_start_buffer - 100
+            }else{
+                0
+            };
+
+            debug!("Chunk timeout value: {}, display duration: {}, already loading: {}", 
+                timeout_val, 
+                chunk_duration.as_millis(),
+                loading_duration_at_now.as_millis()
+            );
+
+            // Если не смогли получить результат одной футуры в течение таймаута, 
+            // делаем еще попыток на следующих чанках - иначе все
+            match timeout(Duration::from_millis(timeout_val), data.join).await {
                 Ok(data) => {
                     total_skipped = 0;
                     let data = data??;
@@ -64,8 +87,9 @@ where
                 },
                 Err(_) =>{
                     total_skipped += 1;
-                    error!("Chunk await timeout: {} total", total_skipped);
-                    if total_skipped > 10 {
+                    error!("Chunk await timeout: {} total repeat", total_skipped);
+                    // Количество повторных фейлов по скорости выгрузки
+                    if total_skipped > 15 {
                         break;
                     }
                 }

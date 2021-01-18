@@ -47,13 +47,15 @@ async fn media_segments_for_url(http_client: &Client, stream_chunks_url: &Url) -
     Ok(chunks_info)
 }
 
-pub type UrlGeneratorResult = Vec<MediaSegment>;
+pub type SegmentInfoGeneratorResult = Vec<MediaSegment>;
 
-pub fn run_url_generator(http_client: Client, 
-                         info_url: Url) -> impl TryStream<Ok=UrlGeneratorResult, Error=AppError> {
+pub fn run_segment_info_generator(http_client: Client, 
+                         info_url: Url) -> impl TryStream<Ok=SegmentInfoGeneratorResult, Error=AppError> {
     let stream = async_stream::try_stream!(
         let mut previous_last_segment = 0;
         loop {
+            trace!("Request chunks info");
+
             // Оборачиваем целиком запрос в таймаут, так как стандартный из Request не хочет работать
             let load_future = timeout(Duration::from_secs(20), media_segments_for_url(&http_client, &info_url));
 
@@ -65,6 +67,12 @@ pub fn run_url_generator(http_client: Client,
                     break;
                 }
             };
+
+            // Если у нас нету сегментов - значит стрим закончился
+            if playlist.segments.len() == 0 {
+                error!("Segments array is empty - stream finished"); 
+                break;
+            }
             
             trace!("Playlist data: {:#?}", playlist);
 
