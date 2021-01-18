@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "m3u8_downloader"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-stream",
  "bytes",
