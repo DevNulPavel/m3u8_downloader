@@ -24,7 +24,11 @@ use log::{
 use async_stream::{
     try_stream
 };
-use crate::{error::{self, AppError}};
+use crate::{
+    error::{
+        AppError
+    }
+};
 use super::{
     loading_starter::{
         LoadingJoin
@@ -36,15 +40,14 @@ where
     S: TryStream<Ok=LoadingJoin, Error=AppError>
 {
     let stream = try_stream!(
-        
         // TODO: ???
         // Преобразует стрим футур в стрим результатов
         let loaders_receiver = loaders_receiver
-        .into_stream() 
-        .map(|join|{
-            futures::future::ready(join)
-        })
-        .buffered(20); // TODO: ???
+            .into_stream() 
+            .map(|join|{
+                futures::future::ready(join)
+            })
+            .buffered(20); // TODO: ???
         tokio::pin!(loaders_receiver);
         let mut total_skipped = 0;
         while let Some(data) = loaders_receiver.try_next().await?{
