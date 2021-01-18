@@ -55,7 +55,7 @@ pub fn run_url_generator(http_client: Client,
         let mut previous_last_segment = 0;
         loop {
             // Оборачиваем целиком запрос в таймаут, так как стандартный из Request не хочет работать
-            let load_future = timeout(Duration::from_secs(30), media_segments_for_url(&http_client, &info_url));
+            let load_future = timeout(Duration::from_secs(15), media_segments_for_url(&http_client, &info_url));
 
             let playlist = load_future.await??;
             trace!("Playlist data: {:#?}", playlist);
@@ -65,7 +65,7 @@ pub fn run_url_generator(http_client: Client,
             for segment in playlist.segments.into_iter() {
                 if seq > previous_last_segment{
                     if (previous_last_segment > 0) && (seq > (previous_last_segment+1)) {
-                        error!("SEGMENT SKIPPED");    
+                        error!("SEGMENT INFO SKIPPED");    
                     }
                     debug!("Yield segment");
                     // yield segment;
