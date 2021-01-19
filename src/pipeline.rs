@@ -1,4 +1,4 @@
-use futures::{
+/*use futures::{
     stream::{
         Stream
     }
@@ -59,4 +59,4 @@ impl<S, I> Pipeline<S, I> {
     pub fn resolve(self) -> P::OutputChannel{
         self.last_channel
     }
-}
+}*/

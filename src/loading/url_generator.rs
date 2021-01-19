@@ -20,7 +20,8 @@ use reqwest::{
 use log::{
     debug,
     error,
-    trace
+    trace,
+    warn
 };
 use m3u8_rs::{
     playlist::{
@@ -81,7 +82,7 @@ pub fn run_segment_info_generator(http_client: Client,
             for segment in playlist.segments.into_iter() {
                 if seq > previous_last_segment{
                     if (previous_last_segment > 0) && (seq > (previous_last_segment+1)) {
-                        error!("SEGMENT INFO SKIPPED");    
+                        warn!("SEGMENT INFO SKIPPED");    
                     }
                     debug!("Yield segment");
                     // yield segment;

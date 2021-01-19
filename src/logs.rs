@@ -38,7 +38,7 @@ fn log_write(buf: &mut Formatter, rec: &Record) -> io::Result<()> {
             writeln!(buf, "{}: {}", prefix, rec.args())
         },
         Level::Warn => {
-            let prefix = "DEBUG".yellow();
+            let prefix = "DEBUG".bright_yellow();
             writeln!(buf, "{}: {}", prefix, rec.args())
         },
         Level::Error => {

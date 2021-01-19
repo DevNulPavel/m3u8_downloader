@@ -15,7 +15,8 @@ use futures::{
     TryStreamExt
 };
 use log::{
-    debug
+    debug,
+    trace
 };
 use bytes::{
     Bytes
@@ -42,6 +43,7 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
     debug!("Loading started");
 
     // TODO: Приоритезация первой загрузки в очереди
+    let load_start_time = Instant::now();
 
     let data = http_client
         .get(url)
@@ -49,6 +51,11 @@ async fn load_chunk(http_client: Client, url: Url) -> Result<Bytes, AppError>{
         .await?
         .bytes()
         .await?;
+
+    let total_millis = Instant::now().duration_since(load_start_time).as_millis() as f64;
+    let length = data.len() as f64;
+    let bits_per_sec = (length * 8.0 * 1000.0) / total_millis;
+    debug!("Chunk load speed: {:.1} MBit/sec", bits_per_sec/1024.0/1024.0);
 
     Ok(data)
 }
@@ -74,7 +81,7 @@ where
         while let Some(segment) = segments_receiver.try_next().await?{
             let http_client = http_client.clone();
             let loading_url = base_url.join(&segment.uri)?;
-            debug!("Chunk url: {}", loading_url);
+            trace!("Chunk url: {}", loading_url);
 
             let join = spawn(load_chunk(http_client, loading_url));
             

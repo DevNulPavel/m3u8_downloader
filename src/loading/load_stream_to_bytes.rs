@@ -20,8 +20,9 @@ use bytes::{
     Bytes
 };
 use log::{
-    error,
-    debug
+    // error,
+    debug,
+    warn
 };
 use async_stream::{
     try_stream
@@ -71,7 +72,7 @@ where
                 0
             };
 
-            debug!("Chunk timeout value: {}, display duration: {}, already loading: {}", 
+            debug!("Chunk timeout value: {} msec, display duration: {} msec, already loading: {} msec", 
                 timeout_val, 
                 chunk_duration.as_millis(),
                 loading_duration_at_now.as_millis()
@@ -87,7 +88,7 @@ where
                 },
                 Err(_) =>{
                     total_skipped += 1;
-                    error!("Chunk await timeout: {} total repeat", total_skipped);
+                    warn!("Chunk await timeout: {} total repeat", total_skipped);
                     // Количество повторных фейлов по скорости выгрузки
                     if total_skipped > 15 {
                         break;

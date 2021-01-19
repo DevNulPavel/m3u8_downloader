@@ -9,11 +9,7 @@
 //! m3u8_downloader -m -q=1 "<link to playlist.m3u8 file>"
 //! m3u8_downloader -m -v=1 "<link to playlist.m3u8 file>"
 //! ```
-//!
-//!
-//!
-//!
-//!
+
 
 
 mod app_arguments;
@@ -45,7 +41,8 @@ use reqwest::{
 };
 use log::{
     debug,
-    info
+    info,
+    error
 };
 use m3u8_rs::{
     playlist::{
@@ -181,7 +178,7 @@ async fn run_stream_finish_awaiter(http_client: Client, master_playlist_url: Url
     // Таймауты на чанках нормально не работают, окончанием стрима можно считать пустой мастер-плейлист
     loop {
         // Получаем информацию о плейлисте
-        debug!("Master request accessible check");
+        debug!("Master playlist accessible check");
         match request_master_playlist(&http_client, &master_playlist_url).await{
             Ok(_) => {
                 tokio::time::sleep(Duration::from_secs(10)).await;
@@ -189,7 +186,7 @@ async fn run_stream_finish_awaiter(http_client: Client, master_playlist_url: Url
             Err(e) => {
                 match e {
                     AppError::MasterStreamIsEmpty => {
-                        info!("\nMaster stream is finished :-(");
+                        error!("\nMaster stream is finished :-(");
                         return Ok(());
                     },
                     err @ _ =>{
@@ -305,7 +302,7 @@ async fn async_main() -> Result<(), AppError> {
                     }
                 };
 
-                info!("Chunk received: {}kB", data.len() / 1024);
+                info!("Chunk received: {} kBytes", data.len() / 1024);
 
                 // Отдаем получателям
                 let futures_iter = receivers
