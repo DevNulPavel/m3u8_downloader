@@ -1,6 +1,6 @@
 [package]
 name = "m3u8_downloader"
-version = "0.5.3" # + version in app params!
+version = "0.5.4" # + version in app params!
 authors = ["DevNul <devnulpavel@gmail.com>"]
 edition = "2018"
 description = "Application m3u8_downloader allows to download m3u8 HLS streams by master playlist link."

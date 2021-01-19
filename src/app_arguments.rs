@@ -39,7 +39,7 @@ pub struct AppArguments {
 
 pub fn parse_arguments() -> AppArguments {
     let matches = App::new("M3U8 downloader")
-        .version("0.5.3")
+        .version("0.5.4")
         .author("DevNul <devnulpavel@gmail.com>")
         .about("Allow you download HLS m3u8 streams")
         .arg(Arg::with_name("list_of_specific_quality")
