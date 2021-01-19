@@ -9,7 +9,7 @@ keywords = ["m3u8", "hls"]
 categories = ["command-line-utilities", "multimedia", "asynchronous"]
 homepage = "https://github.com/DevNulPavel/m3u8_downloader"
 repository = "https://github.com/DevNulPavel/m3u8_downloader"
-documentation = "https://github.com/DevNulPavel/m3u8_downloader"
+documentation = "https://docs.rs/crate/m3u8_downloader/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

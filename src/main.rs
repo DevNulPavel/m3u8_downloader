@@ -206,9 +206,9 @@ async fn async_main() -> Result<(), AppError> {
     // Logs
     setup_logs(&app_arguments.verbose);
 
-    // TODO: Завершение стрима
+    // Создание клиента
     let http_client = Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(30))
         .build()
         .expect("Http client build failed");
 
@@ -256,7 +256,6 @@ async fn async_main() -> Result<(), AppError> {
         ]
     };
 
-    // TODO: Прерывать работу не в начале, а уже в самом конце
     // Получаем футуры о прерывании работы
     let interrupt_f = run_interrupt_awaiter().into_stream();
     pin!(interrupt_f);

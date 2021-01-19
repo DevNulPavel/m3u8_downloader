@@ -1,13 +1,3 @@
-use std::{
-    time::{
-        Duration
-    }
-};
-use tokio::{
-    time::{
-        timeout
-    }
-};
 use futures::{
     stream::{
         TryStream
@@ -57,17 +47,8 @@ pub fn run_segment_info_generator(http_client: Client,
         loop {
             trace!("Request chunks info");
 
-            // Оборачиваем целиком запрос в таймаут, так как стандартный из Request не хочет работать
-            let load_future = timeout(Duration::from_secs(20), media_segments_for_url(&http_client, &info_url));
-
-            // В случае таймаута - обрываем стриминг
-            let playlist = match load_future.await{
-                Ok(playlist) => playlist?,
-                Err(_) => {
-                    error!("Playlist chunks info timeout");        
-                    break;
-                }
-            };
+            // Получаем информацию о сегментах
+            let playlist = media_segments_for_url(&http_client, &info_url).await?;
 
             // Если у нас нету сегментов - значит стрим закончился
             if playlist.segments.len() == 0 {

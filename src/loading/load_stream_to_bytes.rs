@@ -43,15 +43,15 @@ where
     S: TryStream<Ok=LoadingJoin, Error=AppError>
 {
     let stream = try_stream!(
-        // TODO: ???
         // Преобразует стрим футур в стрим результатов
         let loaders_receiver = loaders_receiver
             .into_stream() 
             .map(|join|{
                 futures::future::ready(join)
             })
-            .buffered(20); // TODO: ???
+            .buffered(20);
         tokio::pin!(loaders_receiver);
+
         let mut total_skipped: i32 = 0;
         let mut time_start_buffer: i32 = 3000; // Увеличение таймаута для начальных запусков
         while let Some(data) = loaders_receiver.try_next().await?{
